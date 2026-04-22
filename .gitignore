@@ -29,3 +29,6 @@ test-results/
 # Local generated artifacts
 packages/ui/src/index.js
 packages/ui/src/index.d.ts
+
+
+.claude
