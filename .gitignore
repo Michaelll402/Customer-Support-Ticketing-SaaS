@@ -31,4 +31,4 @@ packages/ui/src/index.js
 packages/ui/src/index.d.ts
 
 
-/.claude
+.claude/
