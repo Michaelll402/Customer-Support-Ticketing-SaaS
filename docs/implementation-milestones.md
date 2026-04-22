@@ -35,11 +35,13 @@ No milestone may leave major half-built features behind.
 ## Current Status Snapshot
 
 - **M0 is complete and closed.**
-- **M1 is not started yet.**
-- The next implementation step is to extract focused M1 specs before coding:
-  - `DB-01` - Identity schema
-  - `BE-01` - Auth & RBAC
-  - `FE-01` - App shell and auth screens
+- **M1 is complete and closed.**
+- The database/backend M1 lean-auth slice is already implemented:
+  - `DB-01` - Identity schema for `Role` and `User`
+  - `BE-01` - Auth endpoints, JWT cookie auth, role guards, seed roles/users, backend tests
+- The frontend M1 auth/app-shell slice is also implemented:
+  - `FE-01` - Sign-in, sign-up, `/auth/me` hydration, protected routes, role-aware shell, logout
+- **M2 has not started yet.** The next implementation step is focused M2 spec extraction.
 - M0 delivered the monorepo foundation, `apps/web`, `apps/api`, shared packages,
   Prisma initialization, Swagger, env validation, Pino logging, and testing setup.
 - **BullMQ is scaffolded only in M0.** No jobs, processors, or Redis queue wiring are
@@ -230,6 +232,7 @@ No session, `UserSession`, password reset, or email verification tables in M1.
 - `POST /auth/register` — create user, hash password, return access token
 - `POST /auth/login` — validate credentials, return access token
 - `GET /auth/me` — return current user from JWT
+- `POST /auth/logout` — clear the access token cookie
 - JWT strategy (`@nestjs/passport`, `passport-jwt`)
 - Bcrypt password hashing
 - `JwtAuthGuard` — protects routes
@@ -245,7 +248,7 @@ No session, `UserSession`, password reset, or email verification tables in M1.
 
 - Sign-in page (`/sign-in`)
 - Sign-up page (`/sign-up`)
-- JWT storage (httpOnly cookie preferred, or localStorage — decide at implementation)
+- JWT storage via a single `httpOnly` access-token cookie
 - `useCurrentUser` hook backed by `GET /auth/me`
 - Route protection: unauthenticated users redirected to `/sign-in`
 - Role-aware navigation sidebar:

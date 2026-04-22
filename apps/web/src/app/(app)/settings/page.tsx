@@ -5,7 +5,7 @@ const SettingsPage = () => {
     <PageScaffold
       eyebrow="APP SHELL"
       title="Settings Placeholder"
-      description="Workspace configuration and admin tooling are explicitly deferred to Milestone 5. Only the route and shell are established here."
+      description="Only admin users should reach this placeholder route in Milestone 1. Real workspace configuration and admin CRUD remain deferred to Milestone 5."
     />
   );
 };

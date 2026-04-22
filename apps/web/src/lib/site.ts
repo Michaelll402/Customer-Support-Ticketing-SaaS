@@ -1,29 +1,82 @@
-import type { AppShellItem } from '@customer-support/ui';
+import type { UserRole } from '@/lib/auth';
 
 export const siteTitle = 'Support Workspace';
 
 export const siteSubtitle =
-  'Milestone 0 foundation only. Navigation, providers, and layout are in place while auth and business workflows remain intentionally deferred.';
+  'Milestone 1 lean auth is active. Session truth comes from `/auth/me`, while ticket operations, reporting, and admin tooling remain deferred.';
 
-export const appShellItems: AppShellItem[] = [
-  {
-    href: '/dashboard',
-    label: 'Dashboard',
-    description: 'Management and SLA views will land in Milestone 5.',
+export interface AppNavigationItem {
+  description?: string;
+  href: string;
+  label: string;
+}
+
+const appRouteOrder = [
+  '/dashboard',
+  '/tickets',
+  '/settings',
+  '/profile',
+] as const;
+
+const appRouteDescriptions: Record<(typeof appRouteOrder)[number], string> = {
+  '/dashboard':
+    'Dashboard metrics and SLA reporting remain deferred to Milestone 5.',
+  '/profile': 'Profile editing remains outside Milestone 1.',
+  '/settings':
+    'Admin configuration screens remain placeholder-only until Milestone 5.',
+  '/tickets': 'Ticket workflows are deferred until Milestone 2.',
+};
+
+const appRouteLabelsByRole: Record<
+  UserRole,
+  Partial<Record<(typeof appRouteOrder)[number], string>>
+> = {
+  ADMIN: {
+    '/dashboard': 'Dashboard',
+    '/profile': 'Profile',
+    '/settings': 'Settings',
+    '/tickets': 'Ticket Queue',
   },
-  {
-    href: '/tickets',
-    label: 'Tickets',
-    description: 'Ticket list and detail workflows begin in Milestone 2.',
+  AGENT: {
+    '/profile': 'Profile',
+    '/tickets': 'Ticket Queue',
   },
-  {
-    href: '/settings',
-    label: 'Settings',
-    description: 'Admin controls are deferred to Milestone 5.',
+  CUSTOMER: {
+    '/profile': 'Profile',
+    '/tickets': 'My Tickets',
   },
-  {
-    href: '/profile',
-    label: 'Profile',
-    description: 'User profile scaffolding only in Milestone 0.',
+  MANAGER: {
+    '/dashboard': 'Dashboard',
+    '/profile': 'Profile',
+    '/tickets': 'My Queue',
   },
-];
+};
+
+export const getAppShellItems = (role: UserRole): AppNavigationItem[] =>
+  appRouteOrder
+    .filter((path) => appRouteLabelsByRole[role][path])
+    .map((path) => ({
+      description: appRouteDescriptions[path],
+      href: path,
+      label: appRouteLabelsByRole[role][path]!,
+    }));
+
+export const getDefaultAppPath = (role: UserRole) => {
+  switch (role) {
+    case 'MANAGER':
+    case 'ADMIN':
+      return '/dashboard';
+    case 'CUSTOMER':
+    case 'AGENT':
+    default:
+      return '/tickets';
+  }
+};
+
+export const canAccessAppPath = (role: UserRole, pathname: string) =>
+  getAppShellItems(role).some(
+    (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
+  );
+
+export const formatRoleLabel = (role: UserRole) =>
+  `${role.slice(0, 1)}${role.slice(1).toLowerCase()}`;

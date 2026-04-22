@@ -9,15 +9,11 @@ import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { validationPipeOptions } from './common/validation/validation.pipe-options';
+import { AUTH_COOKIE_SECURITY_NAME } from './modules/auth/auth.constants';
 
 const bootstrap = async () => {
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true,
-  });
-
-  app.enableCors({
-    credentials: true,
-    origin: true,
   });
   app.useGlobalFilters(new HttpExceptionFilter());
   app.useGlobalPipes(new ValidationPipe(validationPipeOptions));
@@ -29,15 +25,31 @@ const bootstrap = async () => {
   const host = configService.getOrThrow<string>('app.host');
   const port = configService.getOrThrow<number>('app.port');
   const swaggerPath = configService.getOrThrow<string>('app.swaggerPath');
+  const authCookieName = configService.getOrThrow<string>('auth.cookieName');
+  const webOrigin = configService.getOrThrow<string>('app.webOrigin');
+
+  app.enableCors({
+    credentials: true,
+    origin: webOrigin,
+  });
 
   const swaggerDocument = SwaggerModule.createDocument(
     app,
     new DocumentBuilder()
       .setTitle('Customer Support Ticketing SaaS API')
       .setDescription(
-        'Milestone 0 platform baseline. Business endpoints are intentionally deferred.',
+        'Milestone 1 auth foundation. Ticket and workflow business endpoints remain deferred.',
       )
       .setVersion('0.1.0')
+      .addCookieAuth(
+        authCookieName,
+        {
+          in: 'cookie',
+          name: authCookieName,
+          type: 'apiKey',
+        },
+        AUTH_COOKIE_SECURITY_NAME,
+      )
       .build(),
   );
 

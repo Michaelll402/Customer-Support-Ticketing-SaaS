@@ -5,7 +5,7 @@ const DashboardPage = () => {
     <PageScaffold
       eyebrow="APP SHELL"
       title="Dashboard Placeholder"
-      description="Dashboard routing, navigation framing, and layout are live. Queue metrics, SLA state, and reporting remain deferred until Milestone 5."
+      description="Managers and admins can reach the dashboard route through the role-aware shell. Queue metrics, SLA state, and reporting remain deferred until Milestone 5."
     />
   );
 };

@@ -3,7 +3,14 @@ import { parseEnv, z } from '@customer-support/config';
 export const apiEnvSchema = z.object({
   API_HOST: z.string().min(1).default('0.0.0.0'),
   API_PORT: z.coerce.number().int().positive().default(4000),
+  AUTH_COOKIE_NAME: z.string().min(1).default('access_token'),
   DATABASE_URL: z.string().min(1),
+  JWT_ACCESS_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(28800),
+  JWT_SECRET: z.string().min(1),
   MINIO_ACCESS_KEY: z.string().min(1).default('minioadmin'),
   MINIO_BUCKET: z.string().min(1).default('attachments'),
   MINIO_ENDPOINT: z.string().min(1).default('localhost'),
@@ -16,6 +23,7 @@ export const apiEnvSchema = z.object({
   QUEUE_REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
   SWAGGER_PATH: z.string().min(1).default('api'),
+  WEB_APP_ORIGIN: z.string().url().default('http://localhost:3000'),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;

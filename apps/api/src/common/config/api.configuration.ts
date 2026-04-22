@@ -9,6 +9,12 @@ export const apiConfiguration = () => {
       host: env.API_HOST,
       port: env.API_PORT,
       swaggerPath: env.SWAGGER_PATH,
+      webOrigin: env.WEB_APP_ORIGIN,
+    },
+    auth: {
+      accessTokenTtlSeconds: env.JWT_ACCESS_TOKEN_TTL_SECONDS,
+      cookieName: env.AUTH_COOKIE_NAME,
+      jwtSecret: env.JWT_SECRET,
     },
     database: {
       url: env.DATABASE_URL,
