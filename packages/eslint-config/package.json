@@ -1,0 +1,9 @@
+{
+  "name": "@customer-support/eslint-config",
+  "private": true,
+  "version": "0.1.0",
+  "main": "base.cjs",
+  "files": [
+    "*.cjs"
+  ]
+}

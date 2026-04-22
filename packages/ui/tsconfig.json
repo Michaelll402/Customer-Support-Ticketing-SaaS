@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../tsconfig/react-library.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "types": [
+      "react",
+      "react-dom"
+    ]
+  },
+  "include": [
+    "src"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@customer-support/tsconfig",
+  "private": true,
+  "version": "0.1.0",
+  "files": [
+    "*.json"
+  ],
+  "exports": {
+    "./base.json": "./base.json",
+    "./nest.json": "./nest.json",
+    "./nextjs.json": "./nextjs.json",
+    "./react-library.json": "./react-library.json"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "name": "customer-support-ticketing-saas",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.0.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "corepack pnpm -r --if-present build",
+    "build:packages": "corepack pnpm --filter @customer-support/types --filter @customer-support/config --filter @customer-support/ui build",
+    "check": "corepack pnpm lint && corepack pnpm typecheck && corepack pnpm build && corepack pnpm test",
+    "dev": "corepack pnpm build:packages && concurrently -n web,api -c blue,green \"corepack pnpm dev:web\" \"corepack pnpm dev:api\"",
+    "dev:api": "corepack pnpm --filter @customer-support/api start:dev",
+    "dev:web": "corepack pnpm --filter @customer-support/web dev",
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "lint": "corepack pnpm -r --if-present lint",
+    "prisma:generate": "corepack pnpm --filter @customer-support/api prisma:generate",
+    "prisma:migrate": "corepack pnpm --filter @customer-support/api prisma:migrate",
+    "prisma:seed": "corepack pnpm --filter @customer-support/api prisma:seed",
+    "prepare": "husky",
+    "test": "corepack pnpm -r --if-present test",
+    "typecheck": "corepack pnpm -r --if-present typecheck"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@nestjs/core",
+      "@prisma/client",
+      "@prisma/engines",
+      "esbuild",
+      "prisma",
+      "sharp"
+    ]
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.18.2",
+    "@typescript-eslint/parser": "^8.18.2",
+    "concurrently": "^9.1.2",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^9.1.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.4.3",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2"
+  }
+}
