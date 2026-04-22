@@ -10,16 +10,25 @@ const RootPage = () => {
         description="This screen exists to verify the Next.js shell, shared UI package, and provider baseline. Route protection, auth, and business workflows are intentionally deferred."
       >
         <div className="grid gap-4 md:grid-cols-2">
-          <Link className="rounded-2xl border border-slate-200 bg-white p-5 no-underline shadow-sm" href="/sign-in">
+          <Link
+            className="rounded-2xl border border-slate-200 bg-white p-5 no-underline shadow-sm"
+            href="/sign-in"
+          >
             <strong className="block text-slate-950">Auth Route Group</strong>
             <span className="mt-2 block text-sm text-slate-600">
               Sign-in and sign-up routes exist as layout scaffolding only.
             </span>
           </Link>
-          <Link className="rounded-2xl border border-slate-200 bg-white p-5 no-underline shadow-sm" href="/dashboard">
-            <strong className="block text-slate-950">Protected App Route Group</strong>
+          <Link
+            className="rounded-2xl border border-slate-200 bg-white p-5 no-underline shadow-sm"
+            href="/dashboard"
+          >
+            <strong className="block text-slate-950">
+              Protected App Route Group
+            </strong>
             <span className="mt-2 block text-sm text-slate-600">
-              Dashboard, tickets, settings, and profile routes are present as placeholder screens.
+              Dashboard, tickets, settings, and profile routes are present as
+              placeholder screens.
             </span>
           </Link>
         </div>

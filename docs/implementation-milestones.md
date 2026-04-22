@@ -53,15 +53,15 @@ No milestone may leave major half-built features behind.
 
 ### Milestone overview
 
-| # | Name | Demo outcome |
-|---|------|-------------|
-| M0 | Project Foundation | Both apps boot; Docker-ready local foundation exists |
-| M1 | Authentication, Roles & App Shell | Sign up, sign in, role-aware shell |
-| M2 | Ticket Core | Create, view, list, filter tickets |
-| M3 | Conversation, Notes & Attachments | Full support thread with files |
-| M4 | Workflow, Notifications & Realtime | Agents work tickets; live updates |
-| M5 | SLA, Dashboards & Admin | Managers monitor; admins configure |
-| M6 | Testing Hardening, Polish & Deployment | Deployed, tested, recruiter-ready |
+| #   | Name                                   | Demo outcome                                         |
+| --- | -------------------------------------- | ---------------------------------------------------- |
+| M0  | Project Foundation                     | Both apps boot; Docker-ready local foundation exists |
+| M1  | Authentication, Roles & App Shell      | Sign up, sign in, role-aware shell                   |
+| M2  | Ticket Core                            | Create, view, list, filter tickets                   |
+| M3  | Conversation, Notes & Attachments      | Full support thread with files                       |
+| M4  | Workflow, Notifications & Realtime     | Agents work tickets; live updates                    |
+| M5  | SLA, Dashboards & Admin                | Managers monitor; admins configure                   |
+| M6  | Testing Hardening, Polish & Deployment | Deployed, tested, recruiter-ready                    |
 
 ---
 
@@ -895,33 +895,33 @@ Each spec must be extracted and refined before implementation begins.
 
 ### Database specs
 
-| ID | Milestone | Scope |
-|----|-----------|-------|
-| DB-01 | M1 | Identity schema — User, Role |
-| DB-02 | M2 | Ticket core — Ticket, Team, Category, Tag, TicketEvent |
-| DB-03 | M3 | Conversation — TicketMessage, Attachment |
-| DB-04 | M4 | Notifications — Notification, TicketEvent expansions |
-| DB-05 | M5 | SLA & audit — SLAPlan, AuditLog |
+| ID    | Milestone | Scope                                                  |
+| ----- | --------- | ------------------------------------------------------ |
+| DB-01 | M1        | Identity schema — User, Role                           |
+| DB-02 | M2        | Ticket core — Ticket, Team, Category, Tag, TicketEvent |
+| DB-03 | M3        | Conversation — TicketMessage, Attachment               |
+| DB-04 | M4        | Notifications — Notification, TicketEvent expansions   |
+| DB-05 | M5        | SLA & audit — SLAPlan, AuditLog                        |
 
 ### Backend specs
 
-| ID | Milestone | Scope |
-|----|-----------|-------|
-| BE-01 | M1 | Auth & RBAC — register, login, JWT guards, role guards |
-| BE-02 | M2 | Ticket management API — CRUD, visibility, events |
-| BE-03 | M3 | Thread, notes & attachments API — messages, S3 |
-| BE-04 | M4 | Workflow actions, notifications, WebSocket gateway |
-| BE-05 | M5 | SLA engine, report endpoints, admin endpoints |
+| ID    | Milestone | Scope                                                  |
+| ----- | --------- | ------------------------------------------------------ |
+| BE-01 | M1        | Auth & RBAC — register, login, JWT guards, role guards |
+| BE-02 | M2        | Ticket management API — CRUD, visibility, events       |
+| BE-03 | M3        | Thread, notes & attachments API — messages, S3         |
+| BE-04 | M4        | Workflow actions, notifications, WebSocket gateway     |
+| BE-05 | M5        | SLA engine, report endpoints, admin endpoints          |
 
 ### Frontend specs
 
-| ID | Milestone | Scope |
-|----|-----------|-------|
-| FE-01 | M1 | App shell, auth screens, role-aware navigation |
-| FE-02 | M2 | Ticket list, detail, and creation pages |
-| FE-03 | M3 | Conversation thread, notes, attachments UI |
-| FE-04 | M4 | Workflow controls, notification center, realtime UX |
-| FE-05 | M5 | Manager dashboard, SLA panels, admin settings |
+| ID    | Milestone | Scope                                               |
+| ----- | --------- | --------------------------------------------------- |
+| FE-01 | M1        | App shell, auth screens, role-aware navigation      |
+| FE-02 | M2        | Ticket list, detail, and creation pages             |
+| FE-03 | M3        | Conversation thread, notes, attachments UI          |
+| FE-04 | M4        | Workflow controls, notification center, realtime UX |
+| FE-05 | M5        | Manager dashboard, SLA panels, admin settings       |
 
 ---
 
@@ -970,5 +970,5 @@ A milestone is complete when **all of the following are true**:
 
 ---
 
-*This document is the primary milestone reference. Task breakdowns for each milestone
-are extracted into separate spec files before implementation begins (see §Spec Stream Breakdown).*
+_This document is the primary milestone reference. Task breakdowns for each milestone
+are extracted into separate spec files before implementation begins (see §Spec Stream Breakdown)._

@@ -20,7 +20,9 @@ export const parseEnv = <TSchema extends ZodTypeAny>(
   const result = schema.safeParse(input);
 
   if (!result.success) {
-    throw new Error(`Environment validation failed: ${formatZodError(result.error)}`);
+    throw new Error(
+      `Environment validation failed: ${formatZodError(result.error)}`,
+    );
   }
 
   return result.data;

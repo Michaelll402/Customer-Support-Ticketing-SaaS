@@ -14,7 +14,12 @@ export const AppShell = ({ children }: AppShellProps) => {
   const pathname = usePathname();
 
   return (
-    <AppShellScaffold currentPath={pathname} items={appShellItems} subtitle={siteSubtitle} title={siteTitle}>
+    <AppShellScaffold
+      currentPath={pathname}
+      items={appShellItems}
+      subtitle={siteSubtitle}
+      title={siteTitle}
+    >
       {children}
     </AppShellScaffold>
   );

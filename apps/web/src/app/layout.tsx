@@ -8,7 +8,8 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: webEnv.NEXT_PUBLIC_APP_NAME,
-  description: 'Milestone 0 application shell for the Customer Support Ticketing SaaS.',
+  description:
+    'Milestone 0 application shell for the Customer Support Ticketing SaaS.',
 };
 
 interface RootLayoutProps {

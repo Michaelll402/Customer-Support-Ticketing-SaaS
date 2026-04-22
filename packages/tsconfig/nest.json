@@ -5,15 +5,11 @@
     "declaration": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
-    "lib": [
-      "ES2022"
-    ],
+    "lib": ["ES2022"],
     "module": "commonjs",
     "moduleResolution": "node",
     "sourceMap": true,
     "target": "ES2022",
-    "types": [
-      "node"
-    ]
+    "types": ["node"]
   }
 }
