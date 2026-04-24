@@ -1,35 +1,30 @@
 import type { UserRole } from '@/lib/auth';
+import { appRoutePaths, type AppRoutePath } from '@/lib/app-access';
 
 export const siteTitle = 'Support Workspace';
 
 export const siteSubtitle =
-  'Milestone 1 lean auth is active. Session truth comes from `/auth/me`, while ticket operations, reporting, and admin tooling remain deferred.';
+  'Lean auth remains the session foundation, and Milestone 2 now includes the ticket list, customer ticket creation, and metadata-only ticket detail. Conversation and later workflow slices remain deferred.';
 
 export interface AppNavigationItem {
   description?: string;
-  href: string;
+  href: AppRoutePath;
   label: string;
 }
 
-const appRouteOrder = [
-  '/dashboard',
-  '/tickets',
-  '/settings',
-  '/profile',
-] as const;
-
-const appRouteDescriptions: Record<(typeof appRouteOrder)[number], string> = {
+const appRouteDescriptions: Record<AppRoutePath, string> = {
   '/dashboard':
     'Dashboard metrics and SLA reporting remain deferred to Milestone 5.',
   '/profile': 'Profile editing remains outside Milestone 1.',
   '/settings':
     'Admin configuration screens remain placeholder-only until Milestone 5.',
-  '/tickets': 'Ticket workflows are deferred until Milestone 2.',
+  '/tickets':
+    'Ticket list, filters, sorting, pagination, customer ticket creation, and metadata-only ticket detail are live in Milestone 2. Conversation stays deferred to Milestone 3.',
 };
 
 const appRouteLabelsByRole: Record<
   UserRole,
-  Partial<Record<(typeof appRouteOrder)[number], string>>
+  Partial<Record<AppRoutePath, string>>
 > = {
   ADMIN: {
     '/dashboard': 'Dashboard',
@@ -53,30 +48,13 @@ const appRouteLabelsByRole: Record<
 };
 
 export const getAppShellItems = (role: UserRole): AppNavigationItem[] =>
-  appRouteOrder
+  appRoutePaths
     .filter((path) => appRouteLabelsByRole[role][path])
     .map((path) => ({
       description: appRouteDescriptions[path],
       href: path,
       label: appRouteLabelsByRole[role][path]!,
     }));
-
-export const getDefaultAppPath = (role: UserRole) => {
-  switch (role) {
-    case 'MANAGER':
-    case 'ADMIN':
-      return '/dashboard';
-    case 'CUSTOMER':
-    case 'AGENT':
-    default:
-      return '/tickets';
-  }
-};
-
-export const canAccessAppPath = (role: UserRole, pathname: string) =>
-  getAppShellItems(role).some(
-    (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
-  );
 
 export const formatRoleLabel = (role: UserRole) =>
   `${role.slice(0, 1)}${role.slice(1).toLowerCase()}`;

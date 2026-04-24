@@ -2,32 +2,18 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 
 import { AuthFormShell } from '@/components/auth/auth-form-shell';
-import { useCurrentUser, useRegister } from '@/hooks/use-auth';
-import { type SignUpInput, signUpSchema, type UserRole } from '@/lib/auth';
+import { useRegister } from '@/hooks/use-auth';
+import { useAuthPageSession } from '@/hooks/use-auth-page-session';
+import { type SignUpInput, signUpSchema } from '@/lib/auth';
 import { getApiErrorMessage } from '@/lib/api';
-import { canAccessAppPath, getDefaultAppPath } from '@/lib/site';
-
-const resolvePostAuthPath = (role: UserRole, nextPath: string | null) => {
-  if (
-    nextPath &&
-    nextPath.startsWith('/') &&
-    canAccessAppPath(role, nextPath)
-  ) {
-    return nextPath;
-  }
-
-  return getDefaultAppPath(role);
-};
 
 export const SignUpForm = () => {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const currentUserQuery = useCurrentUser();
+  const { currentUserQuery, resolvePostAuthPath } = useAuthPageSession();
   const registerMutation = useRegister();
   const {
     formState: { errors, isSubmitting },
@@ -43,22 +29,10 @@ export const SignUpForm = () => {
     resolver: zodResolver(signUpSchema),
   });
 
-  useEffect(() => {
-    if (!currentUserQuery.data) {
-      return;
-    }
-
-    router.replace(
-      resolvePostAuthPath(currentUserQuery.data.role, searchParams.get('next')),
-    );
-  }, [currentUserQuery.data, router, searchParams]);
-
   const onSubmit = handleSubmit(async (values) => {
     const session = await registerMutation.mutateAsync(values);
 
-    router.push(
-      resolvePostAuthPath(session.user.role, searchParams.get('next')),
-    );
+    router.push(resolvePostAuthPath(session.user.role));
   });
 
   if (currentUserQuery.isLoading) {

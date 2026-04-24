@@ -14,6 +14,32 @@ enum RoleName {
   ADMIN
 }
 
+enum TicketStatus {
+  OPEN
+  PENDING
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TicketEventType {
+  CREATED
+  STATUS_CHANGED
+  PRIORITY_CHANGED
+  ASSIGNED
+  REASSIGNED
+  TAGGED
+  CATEGORIZED
+  CLOSED_BY_CUSTOMER
+  REOPENED_BY_CUSTOMER
+}
+
 model Role {
   id    String   @id @default(uuid()) @db.Uuid
   name  RoleName @unique
@@ -21,13 +47,112 @@ model Role {
 }
 
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  email        String   @unique
-  passwordHash String
-  roleId       String   @db.Uuid
-  firstName    String
-  lastName     String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  role         Role     @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  id               String        @id @default(uuid()) @db.Uuid
+  email            String        @unique
+  passwordHash     String
+  roleId           String        @db.Uuid
+  firstName        String
+  lastName         String
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  role             Role          @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  teamMemberships  TeamMember[]
+  requestedTickets Ticket[]      @relation("RequestedTickets")
+  assignedTickets  Ticket[]      @relation("AssignedTickets")
+  ticketEvents     TicketEvent[] @relation("TicketEventActor")
+}
+
+model Team {
+  id          String       @id @default(uuid()) @db.Uuid
+  name        String       @unique
+  description String?      @db.Text
+  createdAt   DateTime     @default(now())
+  members     TeamMember[]
+  tickets     Ticket[]
+}
+
+model TeamMember {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  teamId    String   @db.Uuid
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, teamId])
+  @@index([teamId])
+  @@index([userId])
+}
+
+model Category {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?  @db.Text
+  color       String?
+  createdAt   DateTime @default(now())
+  tickets     Ticket[]
+}
+
+model Tag {
+  id          String      @id @default(uuid()) @db.Uuid
+  name        String      @unique
+  color       String?
+  ticketLinks TicketTag[]
+}
+
+model Ticket {
+  id                 String         @id @default(uuid()) @db.Uuid
+  number             Int            @unique @default(autoincrement())
+  subject            String
+  description        String         @db.Text
+  status             TicketStatus   @default(OPEN)
+  priority           TicketPriority @default(MEDIUM)
+  requesterId        String         @db.Uuid
+  assigneeId         String?        @db.Uuid
+  teamId             String?        @db.Uuid
+  categoryId         String?        @db.Uuid
+  firstResponseDueAt DateTime?
+  resolutionDueAt    DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  requester          User           @relation("RequestedTickets", fields: [requesterId], references: [id], onDelete: Restrict)
+  assignee           User?          @relation("AssignedTickets", fields: [assigneeId], references: [id], onDelete: SetNull)
+  team               Team?          @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  category           Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  tags               TicketTag[]
+  events             TicketEvent[]
+
+  @@index([requesterId])
+  @@index([assigneeId])
+  @@index([teamId])
+  @@index([categoryId])
+  @@index([status])
+  @@index([priority])
+  @@index([createdAt])
+  @@index([updatedAt])
+}
+
+model TicketTag {
+  ticketId String @db.Uuid
+  tagId    String @db.Uuid
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tag      Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([ticketId, tagId])
+  @@index([tagId])
+}
+
+model TicketEvent {
+  id        String          @id @default(uuid()) @db.Uuid
+  ticketId  String          @db.Uuid
+  actorId   String?         @db.Uuid
+  type      TicketEventType
+  metadata  Json?
+  createdAt DateTime        @default(now())
+  ticket    Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  actor     User?           @relation("TicketEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId, createdAt])
+  @@index([actorId])
+  @@index([type])
 }

@@ -1,13 +1,7 @@
-import { PageScaffold } from '@customer-support/ui';
+import { TicketListPage } from '@/components/tickets/ticket-list-page';
 
 const TicketsPage = () => {
-  return (
-    <PageScaffold
-      eyebrow="APP SHELL"
-      title="Tickets Placeholder"
-      description="The authenticated shell and role-aware navigation are live in Milestone 1. Ticket list, detail, and create-ticket workflows remain deferred to Milestone 2."
-    />
-  );
+  return <TicketListPage />;
 };
 
 export default TicketsPage;

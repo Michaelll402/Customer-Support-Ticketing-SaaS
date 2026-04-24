@@ -7,11 +7,11 @@ import { useEffect } from 'react';
 
 import { useCurrentUser, useLogout } from '@/hooks/use-auth';
 import { getApiErrorMessage } from '@/lib/api';
+import { canAccessAppPath, getDefaultAppPath } from '@/lib/app-access';
+import { getSignInRedirectPath } from '@/lib/auth-routing';
 import {
-  canAccessAppPath,
   formatRoleLabel,
   getAppShellItems,
-  getDefaultAppPath,
   siteSubtitle,
   siteTitle,
 } from '@/lib/site';
@@ -32,7 +32,7 @@ export const AppShell = ({ children }: AppShellProps) => {
     }
 
     if (!currentUserQuery.data) {
-      router.replace(`/sign-in?next=${encodeURIComponent(pathname)}`);
+      router.replace(getSignInRedirectPath(pathname));
       return;
     }
 
@@ -179,14 +179,14 @@ export const AppShell = ({ children }: AppShellProps) => {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.32em] text-sky-700">
-                  Milestone 1
+                  Milestone 2
                 </p>
                 <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">
                   {activeItem?.label ?? 'Workspace'}
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
                   {activeItem?.description ??
-                    'Authenticated workspace routing is live. Business workflows remain deferred to later milestones.'}
+                    'Authenticated workspace routing remains in place, and the ticket list is now live. Deeper workflow slices remain deferred.'}
                 </p>
               </div>
 

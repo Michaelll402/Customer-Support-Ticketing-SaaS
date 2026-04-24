@@ -11,9 +11,9 @@ This repository is designed as a strong portfolio project rather than a toy CRUD
 - managers monitor operations
 - admins configure the workspace
 
-Current implementation status: **Milestone 1 is complete.**
+Current implementation status: **Milestone 2 is complete.**
 
-Milestone 1 delivers lean authentication and the first real product shell. Ticket workflows, conversation threads, attachments, notifications, realtime behavior, SLA logic, dashboards, and admin CRUD are intentionally deferred.
+Milestone 2 delivers the ticket-core slice on top of lean auth: ticket schema + seed data, live ticket list/new/detail flows, a metadata-only detail page, and the narrow customer-owned ticket patch scope. Conversation threads, attachments, notifications, realtime behavior, SLA logic, dashboards, and admin CRUD remain deferred.
 
 ## Product Positioning
 
@@ -66,7 +66,7 @@ Milestone 1 delivers lean authentication and the first real product shell. Ticke
 - `packages/eslint-config`: shared lint config
 - `packages/tsconfig`: shared TS config
 
-The backend is a modular monolith. Milestone 0 established the repo foundation and scaffolds for later modules such as tickets, notifications, storage, queueing, SLA, and admin surfaces. Milestone 1 activates only the auth and app-shell slice.
+The backend is a modular monolith. Milestone 0 established the repo foundation, Milestone 1 activated lean auth plus the app shell, and Milestone 2 activates the ticket-core slice without starting conversation or workflow-control milestones.
 
 ## Current Status
 
@@ -74,20 +74,30 @@ The backend is a modular monolith. Milestone 0 established the repo foundation a
 
 - Monorepo foundation with `apps/web`, `apps/api`, and shared packages
 - Prisma identity schema with `Role` and `User`
+- Ticket-core schema with `Ticket`, `Team`, `TeamMember`, `Category`, `Tag`, `TicketTag`, and `TicketEvent`
 - Seeded roles and local demo users
+- Seeded teams, categories, tags, and demo tickets
 - `POST /auth/register`
 - `POST /auth/login`
 - `POST /auth/logout`
 - `GET /auth/me`
+- `POST /tickets`
+- `GET /tickets`
+- `GET /tickets/categories`
+- `GET /tickets/:id`
+- narrow customer-owned `PATCH /tickets/:id`
 - Password hashing with bcrypt
 - JWT auth via a single `httpOnly` cookie
 - `JwtAuthGuard`, `RolesGuard`, and `@Roles()`
-- Swagger docs for the auth slice
+- Swagger docs for auth and ticket routes
 - Sign-in and sign-up flows in the frontend
 - Session hydration via `/auth/me`
 - Protected app routes
 - Role-aware app shell and navigation
-- Backend auth tests
+- Ticket list page with filters, sorting, pagination, and created-date display
+- Customer ticket creation page with backend-sourced read-only category options
+- Metadata-only ticket detail page with clean 403/404/error states
+- Backend auth and ticket tests
 
 ### Intentionally deferred
 
@@ -95,8 +105,9 @@ The backend is a modular monolith. Milestone 0 established the repo foundation a
 - `UserSession`
 - Password reset
 - Email verification
-- Ticket CRUD and workflows
+- Public replies / internal notes
 - Attachments and storage integration
+- Assignment, priority, category, tag, and team workflow controls
 - BullMQ jobs/processors
 - Notification center
 - Realtime behavior
@@ -104,16 +115,16 @@ The backend is a modular monolith. Milestone 0 established the repo foundation a
 - Real dashboard data
 - Admin CRUD/configuration features
 
-Milestone 2 is the ticket-core milestone and is **not implemented yet**.
+Milestone 2 is complete. Milestone 3 has not started yet.
 
 ## Roles
 
-- **Customer**: sign up, sign in, access the authenticated shell, see `My Tickets` placeholder navigation
-- **Agent**: sign in with seeded account, access `Ticket Queue` placeholder navigation
-- **Manager**: sign in with seeded account, access `My Queue` plus `Dashboard` placeholder navigation
-- **Admin**: sign in with seeded account, access all M1 shell destinations including `Settings` placeholder navigation
+- **Customer**: sign up, sign in, create tickets, view own ticket list/detail, edit own subject/description, and close or reopen own tickets
+- **Agent**: sign in with seeded account and view team-visible / assigned ticket list and metadata-only detail
+- **Manager**: sign in with seeded account and view team-visible / directly assigned ticket list and metadata-only detail
+- **Admin**: sign in with seeded account and view all current ticket-core surfaces plus existing shell destinations
 
-These role-specific routes are navigation and access-shell behavior only in Milestone 1. Business workflows for those areas come later.
+Assignment controls, conversation threads, internal notes, attachments, notifications, realtime updates, dashboards, and admin management workflows all come later.
 
 ## Repository Structure
 
@@ -167,7 +178,7 @@ Notes:
 
 ### Database note
 
-Milestone 1 works with either:
+Milestone 2 works with either:
 
 - local Postgres
 - a hosted Postgres instance such as Neon
@@ -188,7 +199,7 @@ corepack pnpm prisma:migrate
 corepack pnpm prisma:seed
 ```
 
-The seed script creates the four Milestone 1 roles and local demo users.
+The seed script creates the four auth roles plus demo users, teams, categories, tags, and demo tickets.
 Those demo accounts are intended for local/dev verification only.
 
 ### Run the apps
@@ -222,14 +233,19 @@ corepack pnpm build
 corepack pnpm check
 ```
 
-## Current API / Auth Capabilities
+## Current API Capabilities
 
-Available now in Milestone 1:
+Available now:
 
 - `POST /auth/register`
 - `POST /auth/login`
 - `POST /auth/logout`
 - `GET /auth/me`
+- `POST /tickets`
+- `GET /tickets`
+- `GET /tickets/categories`
+- `GET /tickets/:id`
+- `PATCH /tickets/:id`
 
 Behavior:
 
@@ -239,6 +255,10 @@ Behavior:
 - no session table
 - no password reset
 - no email verification
+- customer-only ticket creation in M2
+- customer-owned narrow ticket patch scope in M2: subject edit, description edit, close, and reopen only
+- no assignment, team transfer, priority/category/tag workflow controls in M2
+- no conversation replies, notes, or attachments in M2
 
 Frontend session state is derived from `/auth/me`, not from client-side token storage.
 
@@ -252,7 +272,7 @@ Frontend session state is derived from `/auth/me`, not from client-side token st
 - **M5**: SLA, dashboards, admin controls
 - **M6**: Testing hardening, polish, deployment
 
-Next milestone: **M2 Ticket Core**. Ticket workflows are deliberately not implemented in this repository state yet.
+Next planned milestone after M2 completion: **M3 Conversation, Internal Notes & Attachments**.
 
 ## Project Guardrails
 

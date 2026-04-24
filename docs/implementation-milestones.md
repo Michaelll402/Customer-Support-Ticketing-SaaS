@@ -36,12 +36,17 @@ No milestone may leave major half-built features behind.
 
 - **M0 is complete and closed.**
 - **M1 is complete and closed.**
+- **M2 ticket core is functionally complete and in final cleanup before the completion commit.**
 - The database/backend M1 lean-auth slice is already implemented:
   - `DB-01` - Identity schema for `Role` and `User`
   - `BE-01` - Auth endpoints, JWT cookie auth, role guards, seed roles/users, backend tests
 - The frontend M1 auth/app-shell slice is also implemented:
   - `FE-01` - Sign-in, sign-up, `/auth/me` hydration, protected routes, role-aware shell, logout
-- **M2 has not started yet.** The next implementation step is focused M2 spec extraction.
+- M2 now includes:
+  - `DB-02` - Ticket core schema and demo seed data
+  - `BE-02` - Ticket create/list/detail, read-only category options, narrow customer-owned patch
+  - `FE-02` - Ticket list, ticket creation, metadata-only ticket detail, M3 placeholder
+- **M3 has not started yet.** The next implementation step is focused M3 spec extraction.
 - M0 delivered the monorepo foundation, `apps/web`, `apps/api`, shared packages,
   Prisma initialization, Swagger, env validation, Pino logging, and testing setup.
 - **BullMQ is scaffolded only in M0.** No jobs, processors, or Redis queue wiring are
@@ -367,14 +372,26 @@ TicketEvent
 
 ### Backend scope
 
-- `POST /tickets` — customer or agent creates a ticket
+- `POST /tickets` — customer creates a ticket
 - `GET /tickets` — paginated, sortable, filterable list
   - Filter by: `status`, `priority`, `assigneeId`, `teamId`, `categoryId`
   - Sort by: `createdAt`, `updatedAt`, `priority`, `number`
   - Pagination: `page` + `limit` or cursor-based
+- `GET /tickets/categories` — read-only category options for authenticated ticket-create flows
 - `GET /tickets/:id` — full ticket detail
-- `PATCH /tickets/:id` — update subject, description, status, priority, assignee,
-  team, category (role restrictions enforced)
+- `PATCH /tickets/:id` — narrow customer-owned patch scope only
+  - subject edit
+  - description edit
+  - customer close
+  - customer reopen
+
+**Explicitly deferred from M2**:
+
+- agent-on-behalf-of-customer creation
+- assignment / reassignment
+- priority change workflow controls
+- team transfer workflow controls
+- category/tag workflow controls
 
 **Visibility rules**:
 
@@ -392,6 +409,8 @@ Seed: add 3–5 realistic demo tickets across different statuses and priorities.
 
 - Ticket creation page (`/tickets/new`):
   - subject, description, category selector, priority selector
+  - category selector uses backend-sourced read-only category options
+  - uncategorized submission remains allowed
   - Zod schema validation, loading state on submit
 - Ticket list page (`/tickets`):
   - table with columns: number, subject, status badge, priority badge,
@@ -402,13 +421,15 @@ Seed: add 3–5 realistic demo tickets across different statuses and priorities.
 - Ticket detail page (`/tickets/:id`):
   - header: subject, number, status badge, priority badge
   - metadata panel: requester, assignee, team, category, tags, dates
-  - (conversation thread placeholder — populated in M3)
+  - clearly labeled conversation placeholder only
+  - no reply UI, internal notes UI, attachments UI, or workflow controls until M3+
 - Status and priority badges use clear color coding
 
 ### Testing scope for M2
 
 - Unit: visibility rule logic (can user X see ticket Y?)
 - Integration: `POST /tickets` with valid/invalid payloads
+- Integration: `GET /tickets/categories` returns read-only categories for authenticated users
 - Integration: `GET /tickets` respects role-based visibility
 - Integration: `PATCH /tickets/:id` status change emits a `TicketEvent` row
 - Integration: customer cannot view another customer's ticket (403)
@@ -418,17 +439,22 @@ Seed: add 3–5 realistic demo tickets across different statuses and priorities.
 At the end of M2:
 
 - Customers can create tickets
+- Customers can edit subject/description on their own tickets
+- Customers can close and reopen their own tickets
 - Agents and managers see their relevant ticket lists
 - Ticket detail page renders correctly
+- Ticket creation has a real read-only category source
 - Role visibility is enforced end-to-end
 - Ticket events are recorded for every mutation
 
 ### Exit criteria
 
-- [ ] Ticket creation works for customer and agent roles
+- [ ] Ticket creation works for customer role only
 - [ ] List filtering, sorting, and pagination work
+- [ ] Read-only category options load for ticket creation
 - [ ] Role visibility rules enforced on list and detail endpoints
-- [ ] `TicketEvent` rows exist after every state mutation
+- [ ] Narrow customer-owned patch scope works for subject/description edit and close/reopen
+- [ ] `TicketEvent` rows exist after every state mutation that should emit them in M2
 - [ ] Swagger documents all ticket endpoints
 - [ ] Integration tests pass in CI
 

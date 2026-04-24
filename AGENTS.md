@@ -17,17 +17,25 @@ Read these files before making changes:
 
 - Milestone 0 is complete and closed
 - Milestone 1 is complete and closed
+- Milestone 2 is complete and ready for the completion commit
 - M1 delivered:
   - `DB-01` identity schema for `Role` and `User`
   - `BE-01` lean auth foundation: register, login, logout, `/auth/me`, JWT cookie auth,
     `JwtAuthGuard`, `RolesGuard`, `@Roles()`, seed roles/users, Swagger docs
   - `FE-01` sign-in, sign-up, `/auth/me` hydration, protected app routing,
     role-aware shell/navigation, and logout
-- Milestone 2 has not started yet
-- The next required step is focused spec extraction for M2:
-  - `DB-02` ticket core schema
-  - `BE-02` ticket management API
-  - `FE-02` ticket list, detail, and creation UI
+- M2 delivered:
+  - `DB-02` ticket core schema for `Ticket`, `Team`, `TeamMember`, `Category`,
+    `Tag`, `TicketTag`, and `TicketEvent`, plus demo seed data
+  - `BE-02` ticket create/list/detail, read-only category options, and narrow
+    customer-owned patch scope for subject/description edit plus close/reopen
+  - `FE-02` ticket list, customer ticket creation, metadata-only ticket detail,
+    and a clearly labeled Milestone 3 conversation placeholder
+- Milestone 3 has not started yet
+- The next required step is focused spec extraction for M3:
+  - `DB-03` conversation schema
+  - `BE-03` thread, notes, and attachments API
+  - `FE-03` conversation, notes, and attachments UI
 
 ## What M0 Already Delivered
 
@@ -64,7 +72,6 @@ Read these files before making changes:
 
 ## Deferred Beyond M0
 
-- ticket business logic
 - conversation thread and attachments
 - BullMQ jobs/processors and Redis queue wiring
 - storage/S3 implementation
