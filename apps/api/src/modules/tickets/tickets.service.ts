@@ -10,7 +10,6 @@ import {
   Prisma,
   RoleName,
   TicketEventType,
-  TicketPriority,
   TicketStatus,
 } from '@prisma/client';
 
@@ -84,13 +83,6 @@ export type TicketListRecord = Prisma.TicketGetPayload<{
 
 type TicketVisibilityViewer = Pick<AccessTokenPayload, 'role' | 'sub'>;
 
-const priorityRank: Record<TicketPriority, number> = {
-  [TicketPriority.LOW]: 1,
-  [TicketPriority.MEDIUM]: 2,
-  [TicketPriority.HIGH]: 3,
-  [TicketPriority.URGENT]: 4,
-};
-
 @Injectable()
 export class TicketsService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -111,22 +103,26 @@ export class TicketsService {
     viewer: TicketVisibilityViewer,
     query: TicketListQueryDto,
   ): Promise<TicketListResponseDto> {
-    const visibleTickets = await this.prisma.ticket.findMany({
-      where: this.buildListWhere(viewer, query),
-      include: ticketListInclude,
-    });
+    const where = this.buildListWhere(viewer, query);
+    const orderBy = this.buildListOrderBy(query.sortBy, query.sortOrder);
+    const skip = (query.page - 1) * query.limit;
 
-    const sortedTickets = [...visibleTickets].sort((left, right) =>
-      this.compareTicketListRecords(left, right, query.sortBy, query.sortOrder),
-    );
+    const [totalItems, visibleTickets] = await Promise.all([
+      this.prisma.ticket.count({ where }),
+      this.prisma.ticket.findMany({
+        where,
+        include: ticketListInclude,
+        orderBy,
+        skip,
+        take: query.limit,
+      }),
+    ]);
 
-    const startIndex = (query.page - 1) * query.limit;
-    const totalItems = sortedTickets.length;
     const totalPages =
       totalItems === 0 ? 0 : Math.ceil(totalItems / query.limit);
-    const items = sortedTickets
-      .slice(startIndex, startIndex + query.limit)
-      .map((ticket) => TicketListItemDto.fromRecord(ticket));
+    const items = visibleTickets.map((ticket) =>
+      TicketListItemDto.fromRecord(ticket),
+    );
 
     return {
       items,
@@ -424,36 +420,23 @@ export class TicketsService {
     };
   }
 
-  private compareTicketListRecords(
-    left: TicketListRecord,
-    right: TicketListRecord,
+  private buildListOrderBy(
     sortBy: TicketListSortBy,
     sortOrder: SortOrder,
-  ): number {
-    const direction = sortOrder === SortOrder.ASC ? 1 : -1;
-
-    let comparison = 0;
+  ): Prisma.TicketOrderByWithRelationInput[] {
+    const direction: Prisma.SortOrder =
+      sortOrder === SortOrder.ASC ? 'asc' : 'desc';
 
     switch (sortBy) {
       case TicketListSortBy.NUMBER:
-        comparison = left.number - right.number;
-        break;
+        return [{ number: direction }];
       case TicketListSortBy.UPDATED_AT:
-        comparison = left.updatedAt.getTime() - right.updatedAt.getTime();
-        break;
+        return [{ updatedAt: direction }, { number: direction }];
       case TicketListSortBy.PRIORITY:
-        comparison = priorityRank[left.priority] - priorityRank[right.priority];
-        break;
+        return [{ priority: direction }, { number: direction }];
       case TicketListSortBy.CREATED_AT:
       default:
-        comparison = left.createdAt.getTime() - right.createdAt.getTime();
-        break;
+        return [{ createdAt: direction }, { number: direction }];
     }
-
-    if (comparison !== 0) {
-      return comparison * direction;
-    }
-
-    return (left.number - right.number) * direction;
   }
 }

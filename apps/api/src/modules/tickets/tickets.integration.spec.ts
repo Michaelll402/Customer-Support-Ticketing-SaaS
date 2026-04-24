@@ -117,6 +117,11 @@ type TicketIncludeArgs = {
 };
 
 type FindManyArgs = {
+  orderBy?:
+    | Prisma.TicketOrderByWithRelationInput
+    | Prisma.TicketOrderByWithRelationInput[];
+  skip?: number;
+  take?: number;
   where?: Prisma.TicketWhereInput;
 } & TicketIncludeArgs;
 
@@ -152,6 +157,12 @@ const createPrismaMock = () => {
   const ticketTags: StoredTicketTag[] = [];
   const ticketEvents: StoredTicketEvent[] = [];
   let nextTicketNumber = 1000;
+  const priorityRank: Record<TicketPriority, number> = {
+    [TicketPriority.LOW]: 1,
+    [TicketPriority.MEDIUM]: 2,
+    [TicketPriority.HIGH]: 3,
+    [TicketPriority.URGENT]: 4,
+  };
 
   const attachTicketRelations = (ticket: StoredTicket) => {
     const requester =
@@ -271,6 +282,58 @@ const createPrismaMock = () => {
     return true;
   };
 
+  const compareTickets = (
+    left: StoredTicket,
+    right: StoredTicket,
+    orderBy:
+      | Prisma.TicketOrderByWithRelationInput
+      | Prisma.TicketOrderByWithRelationInput[]
+      | undefined,
+  ) => {
+    const clauses = orderBy
+      ? Array.isArray(orderBy)
+        ? orderBy
+        : [orderBy]
+      : [];
+
+    for (const clause of clauses) {
+      if (clause.number) {
+        const comparison = left.number - right.number;
+
+        if (comparison !== 0) {
+          return clause.number === 'asc' ? comparison : -comparison;
+        }
+      }
+
+      if (clause.createdAt) {
+        const comparison = left.createdAt.getTime() - right.createdAt.getTime();
+
+        if (comparison !== 0) {
+          return clause.createdAt === 'asc' ? comparison : -comparison;
+        }
+      }
+
+      if (clause.updatedAt) {
+        const comparison = left.updatedAt.getTime() - right.updatedAt.getTime();
+
+        if (comparison !== 0) {
+          return clause.updatedAt === 'asc' ? comparison : -comparison;
+        }
+      }
+
+      if (clause.priority) {
+        const comparison =
+          priorityRank[left.priority] - priorityRank[right.priority];
+
+        if (comparison !== 0) {
+          return clause.priority === 'asc' ? comparison : -comparison;
+        }
+      }
+    }
+
+    return 0;
+  };
+
   const userModel = {
     create: vi.fn(
       async ({
@@ -367,6 +430,14 @@ const createPrismaMock = () => {
   };
 
   const ticketModel = {
+    count: vi.fn(
+      async ({
+        where,
+      }: {
+        where?: Prisma.TicketWhereInput;
+      } = {}) =>
+        tickets.filter((ticket) => ticketMatchesWhere(ticket, where)).length,
+    ),
     create: vi.fn(
       async ({
         data,
@@ -430,10 +501,21 @@ const createPrismaMock = () => {
         return ticket ? attachTicketRelations(ticket) : null;
       },
     ),
-    findMany: vi.fn(async ({ where }: FindManyArgs) =>
-      tickets
-        .filter((ticket) => ticketMatchesWhere(ticket, where))
-        .map((ticket) => attachTicketRelations(ticket)),
+    findMany: vi.fn(
+      async ({ orderBy, skip, take, where }: FindManyArgs = {}) => {
+        const filteredTickets = tickets.filter((ticket) =>
+          ticketMatchesWhere(ticket, where),
+        );
+        const sortedTickets = [...filteredTickets].sort((left, right) =>
+          compareTickets(left, right, orderBy),
+        );
+        const pagedTickets = sortedTickets.slice(
+          skip ?? 0,
+          take === undefined ? undefined : (skip ?? 0) + take,
+        );
+
+        return pagedTickets.map((ticket) => attachTicketRelations(ticket));
+      },
     ),
     update: vi.fn(async ({ where, data }: UpdateArgs) => {
       const ticket = tickets.find((entry) => entry.id === where.id);
