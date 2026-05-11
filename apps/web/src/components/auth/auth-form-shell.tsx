@@ -25,17 +25,16 @@ export const AuthFormShell = ({
       <div className="mx-auto grid min-h-[calc(100vh-5rem)] max-w-6xl gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
         <section className="space-y-6">
           <p className="text-xs font-semibold uppercase tracking-[0.32em] text-sky-700">
-            Milestone 1
+            Account access
           </p>
           <div className="space-y-4">
             <h1 className="max-w-xl text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">
-              Support auth that stays small, predictable, and ready for the real
-              product surface.
+              Support access that stays small, predictable, and connected to the
+              workspace.
             </h1>
             <p className="max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
-              This slice only covers identity, access, and the role-aware shell.
-              Ticket workflows, dashboards, and admin operations remain deferred
-              to later milestones.
+              Sign in or create a customer account to work with support tickets,
+              conversations, notes, and attachments.
             </p>
           </div>
 
@@ -56,8 +55,7 @@ export const AuthFormShell = ({
               </p>
               <p className="mt-3 text-sm leading-6 text-slate-700">
                 Customers, agents, managers, and admins see the correct
-                placeholder destinations without pulling ticket or reporting
-                features forward.
+                workspace destinations for their role.
               </p>
             </div>
           </div>

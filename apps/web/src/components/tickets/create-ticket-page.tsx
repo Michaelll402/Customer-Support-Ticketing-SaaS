@@ -103,8 +103,8 @@ export const CreateTicketPage = () => {
           Redirecting to the ticket list
         </h1>
         <p className="mt-3 text-sm leading-6 text-slate-600">
-          Milestone 2 keeps ticket creation customer-only. Staff users stay on
-          the queue/list surfaces in this milestone.
+          Ticket creation is customer-only. Staff users stay on the queue/list
+          surfaces.
         </p>
       </section>
     );
@@ -122,9 +122,8 @@ export const CreateTicketPage = () => {
               Create a new support ticket
             </h1>
             <p className="mt-3 text-sm leading-6 text-slate-600">
-              This Milestone 2 slice adds customer self-service ticket creation
-              only. Assignment, workflow controls, attachments, and conversation
-              threads remain deferred.
+              Create a customer support ticket with the core details support
+              needs for triage.
             </p>
           </div>
 
@@ -180,7 +179,7 @@ export const CreateTicketPage = () => {
                   }
                 >
                   {errors.description?.message ??
-                    'Milestone 2 stores the core issue record only. Conversation replies arrive later.'}
+                    'Describe the core issue so support can triage it.'}
                 </span>
               </label>
             </div>
@@ -230,8 +229,8 @@ export const CreateTicketPage = () => {
                   )}
                 </select>
                 <span className="text-xs text-slate-500">
-                  Priority stays customer-selectable in M2. Staff workflow
-                  controls remain deferred.
+                  Priority stays customer-selectable. Staff workflow controls
+                  remain deferred.
                 </span>
               </label>
 
@@ -273,7 +272,7 @@ export const CreateTicketPage = () => {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm leading-6 text-slate-500">
               The requester is always derived from the authenticated customer.
-              There is no on-behalf-of creation flow in Milestone 2.
+              There is no on-behalf-of creation flow yet.
             </p>
 
             <button

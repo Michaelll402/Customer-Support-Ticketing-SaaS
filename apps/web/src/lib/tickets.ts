@@ -77,11 +77,40 @@ export const createTicketFormSchema = z.object({
 
 export type CreateTicketFormInput = z.infer<typeof createTicketFormSchema>;
 
+export const createTicketMessageFormSchema = z.object({
+  body: z
+    .string()
+    .trim()
+    .min(1, 'Message body is required.')
+    .max(5_000, 'Message body must stay under 5,000 characters.'),
+});
+
+export type CreateTicketMessageFormInput = z.infer<
+  typeof createTicketMessageFormSchema
+>;
+
+export const ticketAttachmentMaxBytes = 10 * 1024 * 1024;
+
+export const ticketAttachmentAllowedMimeTypes = [
+  'application/pdf',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'text/csv',
+  'text/plain',
+] as const;
+
 export interface CreateTicketInput {
   subject: string;
   description: string;
   priority: TicketPriority;
   categoryId?: string;
+}
+
+export interface CreateTicketMessageInput {
+  body: string;
+  attachmentIds?: string[];
 }
 
 export const ticketCategoryOptionSchema = z.object({
@@ -192,6 +221,117 @@ export const ticketDetailResponseSchema = z.object({
 });
 
 export type TicketDetailResponse = z.infer<typeof ticketDetailResponseSchema>;
+
+const ticketTimelineUserSummarySchema = z.object({
+  id: z.string().min(1),
+  email: z.string().email(),
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+});
+
+const ticketTimelineAttachmentSchema = z.object({
+  id: z.string().min(1),
+  ticketId: z.string().min(1),
+  messageId: z.string().min(1).nullable(),
+  uploadedById: z.string().min(1),
+  filename: z.string().min(1),
+  mimeType: z.string().min(1),
+  sizeBytes: z.number().int().min(0),
+  createdAt: z.string().datetime(),
+});
+
+export type TicketTimelineAttachment = z.infer<
+  typeof ticketTimelineAttachmentSchema
+>;
+
+export const ticketTimelineEventTypeSchema = z.enum([
+  'CREATED',
+  'STATUS_CHANGED',
+  'PRIORITY_CHANGED',
+  'ASSIGNED',
+  'REASSIGNED',
+  'TAGGED',
+  'CATEGORIZED',
+  'CLOSED_BY_CUSTOMER',
+  'REOPENED_BY_CUSTOMER',
+  'REPLIED',
+  'NOTE_ADDED',
+  'ATTACHMENT_ADDED',
+]);
+
+export type TicketTimelineEventType = z.infer<
+  typeof ticketTimelineEventTypeSchema
+>;
+
+const ticketTimelineMessageItemSchema = z.object({
+  type: z.enum(['PUBLIC_REPLY', 'INTERNAL_NOTE']),
+  id: z.string().min(1),
+  ticketId: z.string().min(1),
+  author: ticketTimelineUserSummarySchema,
+  body: z.string(),
+  isInternal: z.boolean(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  attachments: z.array(ticketTimelineAttachmentSchema),
+});
+
+const ticketTimelineSystemEventItemSchema = z.object({
+  type: z.literal('SYSTEM_EVENT'),
+  id: z.string().min(1),
+  ticketId: z.string().min(1),
+  eventType: ticketTimelineEventTypeSchema,
+  actor: ticketTimelineUserSummarySchema.nullable(),
+  metadata: z.unknown().nullable(),
+  createdAt: z.string().datetime(),
+});
+
+export const ticketTimelineItemSchema = z.discriminatedUnion('type', [
+  ticketTimelineMessageItemSchema,
+  ticketTimelineSystemEventItemSchema,
+]);
+
+export type TicketTimelineItem = z.infer<typeof ticketTimelineItemSchema>;
+
+export type TicketTimelineMessageItem = Extract<
+  TicketTimelineItem,
+  { type: 'PUBLIC_REPLY' | 'INTERNAL_NOTE' }
+>;
+
+export type TicketTimelineSystemEventItem = Extract<
+  TicketTimelineItem,
+  { type: 'SYSTEM_EVENT' }
+>;
+
+export const ticketTimelineResponseSchema = z.object({
+  ticketId: z.string().min(1),
+  items: z.array(ticketTimelineItemSchema),
+});
+
+export type TicketTimelineResponse = z.infer<
+  typeof ticketTimelineResponseSchema
+>;
+
+export const ticketMessageResponseSchema = z.object({
+  id: z.string().min(1),
+  ticketId: z.string().min(1),
+  author: ticketTimelineUserSummarySchema,
+  body: z.string(),
+  isInternal: z.boolean(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  attachments: z.array(ticketTimelineAttachmentSchema),
+});
+
+export type TicketMessageResponse = z.infer<typeof ticketMessageResponseSchema>;
+
+export const ticketAttachmentDownloadUrlResponseSchema = z.object({
+  url: z.string().url(),
+  expiresInSeconds: z.number().int().positive(),
+});
+
+export type TicketAttachmentDownloadUrlResponse = z.infer<
+  typeof ticketAttachmentDownloadUrlResponseSchema
+>;
 
 const uuidFilterSchema = z
   .string()
@@ -334,6 +474,47 @@ export const getTicketById = async (ticketId: string) => {
   return ticketDetailResponseSchema.parse(response);
 };
 
+export const getTicketTimeline = async (ticketId: string) => {
+  const response = await apiRequest<TicketTimelineResponse>(
+    `/tickets/${ticketId}/timeline`,
+    {
+      cache: 'no-store',
+    },
+  );
+
+  return ticketTimelineResponseSchema.parse(response);
+};
+
+export const uploadTicketAttachment = async (ticketId: string, file: File) => {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await apiRequest<TicketTimelineAttachment>(
+    `/tickets/${ticketId}/attachments`,
+    {
+      method: 'POST',
+      body: formData,
+      cache: 'no-store',
+    },
+  );
+
+  return ticketTimelineAttachmentSchema.parse(response);
+};
+
+export const getTicketAttachmentDownloadUrl = async (
+  ticketId: string,
+  attachmentId: string,
+) => {
+  const response = await apiRequest<TicketAttachmentDownloadUrlResponse>(
+    `/tickets/${ticketId}/attachments/${attachmentId}/download-url`,
+    {
+      cache: 'no-store',
+    },
+  );
+
+  return ticketAttachmentDownloadUrlResponseSchema.parse(response);
+};
+
 export const getTicketCategories = async () => {
   const response = await apiRequest<TicketCategoryOption[]>(
     '/tickets/categories',
@@ -358,6 +539,44 @@ export const createTicket = async (input: CreateTicketInput) => {
   return ticketDetailResponseSchema.parse(response);
 };
 
+export const createTicketPublicReply = async (
+  ticketId: string,
+  input: CreateTicketMessageInput,
+) => {
+  const response = await apiRequest<TicketMessageResponse>(
+    `/tickets/${ticketId}/replies`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+      cache: 'no-store',
+    },
+  );
+
+  return ticketMessageResponseSchema.parse(response);
+};
+
+export const createTicketInternalNote = async (
+  ticketId: string,
+  input: CreateTicketMessageInput,
+) => {
+  const response = await apiRequest<TicketMessageResponse>(
+    `/tickets/${ticketId}/internal-notes`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+      cache: 'no-store',
+    },
+  );
+
+  return ticketMessageResponseSchema.parse(response);
+};
+
 export const ticketStatusLabels: Record<TicketStatus, string> = {
   OPEN: 'Open',
   PENDING: 'Pending',
@@ -370,4 +589,22 @@ export const ticketPriorityLabels: Record<TicketPriority, string> = {
   MEDIUM: 'Medium',
   HIGH: 'High',
   URGENT: 'Urgent',
+};
+
+export const ticketTimelineEventTypeLabels: Record<
+  TicketTimelineEventType,
+  string
+> = {
+  ASSIGNED: 'Ticket assigned',
+  ATTACHMENT_ADDED: 'Attachment uploaded',
+  CATEGORIZED: 'Ticket categorized',
+  CLOSED_BY_CUSTOMER: 'Closed by customer',
+  CREATED: 'Ticket created',
+  NOTE_ADDED: 'Internal note added',
+  PRIORITY_CHANGED: 'Priority changed',
+  REASSIGNED: 'Ticket reassigned',
+  REOPENED_BY_CUSTOMER: 'Reopened by customer',
+  REPLIED: 'Reply added',
+  STATUS_CHANGED: 'Status changed',
+  TAGGED: 'Tags updated',
 };

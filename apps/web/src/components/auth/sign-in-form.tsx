@@ -30,7 +30,7 @@ export const SignInForm = () => {
   const onSubmit = handleSubmit(async (values) => {
     const session = await loginMutation.mutateAsync(values);
 
-    router.push(resolvePostAuthPath(session.user.role));
+    router.replace(resolvePostAuthPath(session.user.role));
   });
 
   if (currentUserQuery.isLoading) {

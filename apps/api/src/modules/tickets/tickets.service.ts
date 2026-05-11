@@ -1,8 +1,10 @@
 import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
   Inject,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -12,16 +14,23 @@ import {
   TicketEventType,
   TicketStatus,
 } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 
 import type { AccessTokenPayload } from '../auth/auth.types';
+import { StorageService } from '../storage/storage.service';
 import { PrismaService } from '../../common/database/prisma.service';
+import type { AttachmentDownloadUrlDto } from './dto/ticket-attachment.dto';
+import { TicketAttachmentDto } from './dto/ticket-attachment.dto';
 import { TicketDetailDto } from './dto/ticket-detail.dto';
 import { TicketCategoryOptionDto } from './dto/ticket-category-option.dto';
+import { TicketMessageDto } from './dto/ticket-message.dto';
 import type { CreateTicketDto } from './dto/create-ticket.dto';
+import type { CreateTicketMessageDto } from './dto/create-ticket-message.dto';
 import { SortOrder, TicketListSortBy } from './dto/ticket-list-query.dto';
 import { TicketListItemDto } from './dto/ticket-list-item.dto';
 import type { TicketListQueryDto } from './dto/ticket-list-query.dto';
 import type { TicketListResponseDto } from './dto/ticket-list-response.dto';
+import { TicketTimelineDto } from './dto/ticket-timeline.dto';
 import type { UpdateTicketDto } from './dto/update-ticket.dto';
 
 const ticketDetailInclude = Prisma.validator<Prisma.TicketInclude>()({
@@ -73,6 +82,34 @@ const ticketListInclude = Prisma.validator<Prisma.TicketInclude>()({
   },
 });
 
+const ticketMessageInclude = Prisma.validator<Prisma.TicketMessageInclude>()({
+  attachments: {
+    orderBy: {
+      createdAt: 'asc',
+    },
+  },
+  author: {
+    select: {
+      email: true,
+      firstName: true,
+      id: true,
+      lastName: true,
+    },
+  },
+});
+
+const ticketTimelineEventInclude =
+  Prisma.validator<Prisma.TicketEventInclude>()({
+    actor: {
+      select: {
+        email: true,
+        firstName: true,
+        id: true,
+        lastName: true,
+      },
+    },
+  });
+
 export type TicketDetailRecord = Prisma.TicketGetPayload<{
   include: typeof ticketDetailInclude;
 }>;
@@ -81,11 +118,53 @@ export type TicketListRecord = Prisma.TicketGetPayload<{
   include: typeof ticketListInclude;
 }>;
 
+export type TicketMessageRecord = Prisma.TicketMessageGetPayload<{
+  include: typeof ticketMessageInclude;
+}>;
+
+export type TicketTimelineMessageRecord = TicketMessageRecord;
+
+export type TicketTimelineEventRecord = Prisma.TicketEventGetPayload<{
+  include: typeof ticketTimelineEventInclude;
+}>;
+
 type TicketVisibilityViewer = Pick<AccessTokenPayload, 'role' | 'sub'>;
+type VisibleTicketForMutation = {
+  id: string;
+  status: TicketStatus;
+};
+
+export const TICKET_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+
+const DEFAULT_TICKET_TEAM_NAME = 'Technical Support';
+
+const CATEGORY_NAME_TO_TEAM_NAME: Record<string, string> = {
+  Billing: 'Billing',
+};
+
+const TICKET_ATTACHMENT_ALLOWED_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'text/csv',
+  'text/plain',
+]);
+
+export type TicketAttachmentUploadFile = {
+  buffer: Buffer;
+  mimetype: string;
+  originalname: string;
+  size: number;
+};
 
 @Injectable()
 export class TicketsService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(StorageService) private readonly storage: StorageService,
+  ) {}
 
   async listTicketCategories(): Promise<TicketCategoryOptionDto[]> {
     const categories = await this.prisma.category.findMany({
@@ -144,9 +223,7 @@ export class TicketsService {
     input: CreateTicketDto,
   ): Promise<TicketDetailDto> {
     if (requester.role !== RoleName.CUSTOMER) {
-      throw new ForbiddenException(
-        'Only customers can create tickets in Milestone 2.',
-      );
+      throw new ForbiddenException('Only customers can create tickets.');
     }
 
     const requesterExists = await this.prisma.user.findUnique({
@@ -162,20 +239,27 @@ export class TicketsService {
       throw new UnauthorizedException('Authenticated user no longer exists.');
     }
 
+    let resolvedCategory: { id: string; name: string } | null = null;
+
     if (input.categoryId) {
-      const category = await this.prisma.category.findUnique({
+      resolvedCategory = await this.prisma.category.findUnique({
         where: {
           id: input.categoryId,
         },
         select: {
           id: true,
+          name: true,
         },
       });
 
-      if (!category) {
+      if (!resolvedCategory) {
         throw new NotFoundException('Category not found.');
       }
     }
+
+    const teamId = await this.resolveTeamIdForCategory(
+      resolvedCategory?.name ?? null,
+    );
 
     const ticket = await this.prisma.ticket.create({
       data: {
@@ -185,6 +269,7 @@ export class TicketsService {
         requesterId: requester.sub,
         status: TicketStatus.OPEN,
         subject: input.subject,
+        teamId,
         events: {
           create: {
             actorId: requester.sub,
@@ -198,15 +283,30 @@ export class TicketsService {
     return TicketDetailDto.fromRecord(ticket);
   }
 
+  private async resolveTeamIdForCategory(
+    categoryName: string | null,
+  ): Promise<string | null> {
+    const targetTeamName =
+      (categoryName !== null && CATEGORY_NAME_TO_TEAM_NAME[categoryName]) ||
+      DEFAULT_TICKET_TEAM_NAME;
+    const team = await this.prisma.team.findUnique({
+      where: {
+        name: targetTeamName,
+      },
+      select: {
+        id: true,
+      },
+    });
+    return team?.id ?? null;
+  }
+
   async updateTicket(
     ticketId: string,
     viewer: TicketVisibilityViewer,
     input: UpdateTicketDto,
   ): Promise<TicketDetailDto> {
     if (viewer.role !== RoleName.CUSTOMER) {
-      throw new ForbiddenException(
-        'Only customers can patch tickets in Milestone 2.',
-      );
+      throw new ForbiddenException('Only customers can patch tickets.');
     }
 
     if (
@@ -290,7 +390,7 @@ export class TicketsService {
         };
       } else {
         throw new BadRequestException(
-          'Customers may only close or reopen their own tickets in Milestone 2.',
+          'Customers may only close or reopen their own tickets.',
         );
       }
     }
@@ -310,6 +410,212 @@ export class TicketsService {
     });
 
     return TicketDetailDto.fromRecord(updatedTicket);
+  }
+
+  async createPublicReply(
+    ticketId: string,
+    viewer: TicketVisibilityViewer,
+    input: CreateTicketMessageDto,
+  ): Promise<TicketMessageDto> {
+    const visibleTicket = await this.findVisibleTicketForMutation(
+      ticketId,
+      viewer,
+    );
+
+    if (visibleTicket.status === TicketStatus.CLOSED) {
+      throw new BadRequestException(
+        'Closed tickets cannot receive public replies.',
+      );
+    }
+
+    const message = await this.createMessageWithEvent({
+      actorId: viewer.sub,
+      attachmentIds: input.attachmentIds ?? [],
+      body: input.body,
+      isInternal: false,
+      ticketId: visibleTicket.id,
+      type: TicketEventType.REPLIED,
+    });
+
+    return TicketMessageDto.fromRecord(message);
+  }
+
+  async createInternalNote(
+    ticketId: string,
+    viewer: TicketVisibilityViewer,
+    input: CreateTicketMessageDto,
+  ): Promise<TicketMessageDto> {
+    if (viewer.role === RoleName.CUSTOMER) {
+      throw new ForbiddenException('Customers cannot create internal notes.');
+    }
+
+    const visibleTicket = await this.findVisibleTicketForMutation(
+      ticketId,
+      viewer,
+    );
+
+    const message = await this.createMessageWithEvent({
+      actorId: viewer.sub,
+      attachmentIds: input.attachmentIds ?? [],
+      body: input.body,
+      isInternal: true,
+      ticketId: visibleTicket.id,
+      type: TicketEventType.NOTE_ADDED,
+    });
+
+    return TicketMessageDto.fromRecord(message);
+  }
+
+  async getTicketTimeline(
+    ticketId: string,
+    viewer: TicketVisibilityViewer,
+  ): Promise<TicketTimelineDto> {
+    const visibleTicket = await this.findVisibleTicketForMutation(
+      ticketId,
+      viewer,
+    );
+    const messageWhere: Prisma.TicketMessageWhereInput = {
+      ticketId: visibleTicket.id,
+    };
+    const eventWhere: Prisma.TicketEventWhereInput = {
+      ticketId: visibleTicket.id,
+    };
+
+    if (viewer.role === RoleName.CUSTOMER) {
+      messageWhere.isInternal = false;
+      eventWhere.NOT = {
+        type: {
+          in: [TicketEventType.NOTE_ADDED, TicketEventType.ATTACHMENT_ADDED],
+        },
+      };
+    }
+
+    const [messages, events] = await Promise.all([
+      this.prisma.ticketMessage.findMany({
+        where: messageWhere,
+        include: ticketMessageInclude,
+        orderBy: {
+          createdAt: 'asc',
+        },
+      }),
+      this.prisma.ticketEvent.findMany({
+        where: eventWhere,
+        include: ticketTimelineEventInclude,
+        orderBy: {
+          createdAt: 'asc',
+        },
+      }),
+    ]);
+
+    return TicketTimelineDto.fromRecords(visibleTicket.id, messages, events);
+  }
+
+  async uploadTicketAttachment(
+    ticketId: string,
+    viewer: TicketVisibilityViewer,
+    file: TicketAttachmentUploadFile | undefined,
+  ): Promise<TicketAttachmentDto> {
+    const visibleTicket = await this.findVisibleTicketForMutation(
+      ticketId,
+      viewer,
+    );
+    const normalizedFile = this.validateAttachmentFile(file);
+    const storedKey = this.buildAttachmentStoredKey(
+      visibleTicket.id,
+      normalizedFile.filename,
+    );
+
+    await this.storage.upload({
+      buffer: normalizedFile.buffer,
+      key: storedKey,
+      mimeType: normalizedFile.mimeType,
+    });
+
+    try {
+      const attachment = await this.prisma.$transaction(async (transaction) => {
+        const createdAttachment = await transaction.attachment.create({
+          data: {
+            filename: normalizedFile.filename,
+            messageId: null,
+            mimeType: normalizedFile.mimeType,
+            sizeBytes: normalizedFile.sizeBytes,
+            storedKey,
+            ticketId: visibleTicket.id,
+            uploadedById: viewer.sub,
+          },
+        });
+
+        await transaction.ticketEvent.create({
+          data: {
+            actorId: viewer.sub,
+            metadata: {
+              attachmentId: createdAttachment.id,
+              filename: createdAttachment.filename,
+              mimeType: createdAttachment.mimeType,
+              sizeBytes: createdAttachment.sizeBytes,
+            },
+            ticketId: visibleTicket.id,
+            type: TicketEventType.ATTACHMENT_ADDED,
+          },
+        });
+
+        return createdAttachment;
+      });
+
+      return TicketAttachmentDto.fromRecord(attachment);
+    } catch (error) {
+      await this.storage.delete(storedKey).catch(() => undefined);
+
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException('Attachment metadata failed.');
+    }
+  }
+
+  async getTicketAttachmentDownloadUrl(
+    ticketId: string,
+    attachmentId: string,
+    viewer: TicketVisibilityViewer,
+  ): Promise<AttachmentDownloadUrlDto> {
+    const visibleTicket = await this.findVisibleTicketForMutation(
+      ticketId,
+      viewer,
+    );
+    const attachment = await this.prisma.attachment.findFirst({
+      where: {
+        id: attachmentId,
+        ticketId: visibleTicket.id,
+      },
+      include: {
+        message: {
+          select: {
+            id: true,
+            isInternal: true,
+            ticketId: true,
+          },
+        },
+      },
+    });
+
+    if (!attachment) {
+      throw new NotFoundException('Attachment not found.');
+    }
+
+    if (viewer.role === RoleName.CUSTOMER) {
+      if (
+        !attachment.message ||
+        attachment.message.ticketId !== visibleTicket.id ||
+        attachment.message.isInternal
+      ) {
+        throw new ForbiddenException(
+          'You do not have access to this attachment.',
+        );
+      }
+    }
+
+    return this.storage.getSignedUrl(attachment.storedKey);
   }
 
   async getTicketById(
@@ -342,6 +648,211 @@ export class TicketsService {
     }
 
     throw new ForbiddenException('You do not have access to this ticket.');
+  }
+
+  private async findVisibleTicketForMutation(
+    ticketId: string,
+    viewer: TicketVisibilityViewer,
+  ): Promise<VisibleTicketForMutation> {
+    const visibleTicket = await this.prisma.ticket.findFirst({
+      where: {
+        id: ticketId,
+        ...this.buildVisibilityWhere(viewer),
+      },
+      select: {
+        id: true,
+        status: true,
+      },
+    });
+
+    if (visibleTicket) {
+      return visibleTicket;
+    }
+
+    const ticketExists = await this.prisma.ticket.findUnique({
+      where: {
+        id: ticketId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!ticketExists) {
+      throw new NotFoundException('Ticket not found.');
+    }
+
+    throw new ForbiddenException('You do not have access to this ticket.');
+  }
+
+  private createMessageWithEvent(input: {
+    actorId: string;
+    attachmentIds: string[];
+    body: string;
+    isInternal: boolean;
+    ticketId: string;
+    type: TicketEventType;
+  }): Promise<TicketMessageRecord> {
+    const uniqueAttachmentIds = this.validateUniqueAttachmentIds(
+      input.attachmentIds,
+    );
+
+    return this.prisma.$transaction(async (transaction) => {
+      const attachments = await this.findLinkableAttachments(
+        transaction,
+        input.ticketId,
+        input.actorId,
+        uniqueAttachmentIds,
+      );
+      const message = await transaction.ticketMessage.create({
+        data: {
+          authorId: input.actorId,
+          body: input.body,
+          isInternal: input.isInternal,
+          ticketId: input.ticketId,
+        },
+        include: ticketMessageInclude,
+      });
+
+      if (attachments.length > 0) {
+        const updateResult = await transaction.attachment.updateMany({
+          data: {
+            messageId: message.id,
+          },
+          where: {
+            id: {
+              in: uniqueAttachmentIds,
+            },
+            messageId: null,
+            ticketId: input.ticketId,
+            uploadedById: input.actorId,
+          },
+        });
+
+        if (updateResult.count !== attachments.length) {
+          throw new BadRequestException(
+            'Attachment IDs must refer to unattached files on this ticket.',
+          );
+        }
+      }
+
+      await transaction.ticketEvent.create({
+        data: {
+          actorId: input.actorId,
+          ticketId: input.ticketId,
+          type: input.type,
+        },
+      });
+
+      return {
+        ...message,
+        attachments: attachments.map((attachment) => ({
+          ...attachment,
+          messageId: message.id,
+        })),
+      };
+    });
+  }
+
+  private validateUniqueAttachmentIds(attachmentIds: string[]) {
+    const uniqueAttachmentIds = [...new Set(attachmentIds)];
+
+    if (uniqueAttachmentIds.length !== attachmentIds.length) {
+      throw new BadRequestException(
+        'Duplicate attachment IDs are not allowed.',
+      );
+    }
+
+    return uniqueAttachmentIds;
+  }
+
+  private async findLinkableAttachments(
+    transaction: Pick<Prisma.TransactionClient, 'attachment'>,
+    ticketId: string,
+    actorId: string,
+    attachmentIds: string[],
+  ) {
+    if (attachmentIds.length === 0) {
+      return [];
+    }
+
+    const attachments = await transaction.attachment.findMany({
+      orderBy: {
+        createdAt: 'asc',
+      },
+      where: {
+        id: {
+          in: attachmentIds,
+        },
+        messageId: null,
+        ticketId,
+        uploadedById: actorId,
+      },
+    });
+
+    if (attachments.length !== attachmentIds.length) {
+      throw new BadRequestException(
+        'Attachment IDs must refer to unattached files on this ticket.',
+      );
+    }
+
+    return attachments;
+  }
+
+  private validateAttachmentFile(
+    file: TicketAttachmentUploadFile | undefined,
+  ): {
+    buffer: Buffer;
+    filename: string;
+    mimeType: string;
+    sizeBytes: number;
+  } {
+    if (!file) {
+      throw new BadRequestException('A file upload is required.');
+    }
+
+    if (!file.buffer || file.size <= 0) {
+      throw new BadRequestException('Attachment file cannot be empty.');
+    }
+
+    if (file.size > TICKET_ATTACHMENT_MAX_BYTES) {
+      throw new BadRequestException('Attachment file exceeds the 10 MB limit.');
+    }
+
+    if (!TICKET_ATTACHMENT_ALLOWED_MIME_TYPES.has(file.mimetype)) {
+      throw new BadRequestException('Attachment MIME type is not allowed.');
+    }
+
+    return {
+      buffer: file.buffer,
+      filename: this.normalizeAttachmentFilename(file.originalname),
+      mimeType: file.mimetype,
+      sizeBytes: file.size,
+    };
+  }
+
+  private normalizeAttachmentFilename(originalName: string) {
+    const withoutPath = originalName.split(/[\\/]/).pop()?.trim() ?? '';
+    const normalized = withoutPath
+      .replace(/[^\w. -]+/g, '')
+      .replace(/\s+/g, ' ')
+      .slice(0, 180)
+      .trim();
+
+    return normalized || 'attachment';
+  }
+
+  private buildAttachmentStoredKey(ticketId: string, filename: string) {
+    const safeFilename = filename
+      .toLowerCase()
+      .replace(/[^a-z0-9.-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 120);
+
+    return `tickets/${ticketId}/attachments/${randomUUID()}-${
+      safeFilename || 'attachment'
+    }`;
   }
 
   private buildVisibilityWhere(

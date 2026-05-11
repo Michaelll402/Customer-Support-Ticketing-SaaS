@@ -36,25 +36,43 @@ No milestone may leave major half-built features behind.
 
 - **M0 is complete and closed.**
 - **M1 is complete and closed.**
-- **M2 ticket core is functionally complete and in final cleanup before the completion commit.**
-- The database/backend M1 lean-auth slice is already implemented:
+- **M2 is complete and closed.**
+- **M3 conversation, internal notes, and attachments are functionally complete and ready for the completion commit.**
+- **M4 has not started yet.** The next implementation step is focused M4 spec extraction.
+- The database/backend M1 lean-auth slice is implemented:
   - `DB-01` - Identity schema for `Role` and `User`
   - `BE-01` - Auth endpoints, JWT cookie auth, role guards, seed roles/users, backend tests
-- The frontend M1 auth/app-shell slice is also implemented:
+- The frontend M1 auth/app-shell slice is implemented:
   - `FE-01` - Sign-in, sign-up, `/auth/me` hydration, protected routes, role-aware shell, logout
-- M2 now includes:
+- M2 includes:
   - `DB-02` - Ticket core schema and demo seed data
   - `BE-02` - Ticket create/list/detail, read-only category options, narrow customer-owned patch
-  - `FE-02` - Ticket list, ticket creation, metadata-only ticket detail, M3 placeholder
-- **M3 has not started yet.** The next implementation step is focused M3 spec extraction.
+  - `FE-02` - Ticket list, ticket creation, metadata ticket detail
+- M3 includes:
+  - `DB-03` - `TicketMessage` (with `isInternal`) and `Attachment` (with nullable
+    `messageId`, `uploadedById`, `storedKey`, `mimeType`, `sizeBytes`), plus
+    `TicketEventType` values `REPLIED`, `NOTE_ADDED`, `ATTACHMENT_ADDED`
+  - `BE-03` - Public reply, internal note, attachment upload, signed download URL,
+    and combined timeline endpoints; customer-side filtering enforced at the
+    query layer; attachment linking restricted to the uploading actor; metadata
+    failures wrap raw errors in a generic 500 and best-effort delete the object
+  - `FE-03` - Combined timeline, public reply composer, staff-only internal note
+    composer, attachment upload with client-side validation, on-demand signed-URL
+    download, composer state reset on ticketId/kind changes, logout cache
+    clearing for role-sensitive ticket queries
 - M0 delivered the monorepo foundation, `apps/web`, `apps/api`, shared packages,
   Prisma initialization, Swagger, env validation, Pino logging, and testing setup.
-- **BullMQ is scaffolded only in M0.** No jobs, processors, or Redis queue wiring are
-  implemented yet.
-- **Storage is scaffolded only in M0.** No S3/MinIO upload flow or attachment logic is
-  implemented yet.
+- **BullMQ is scaffolded only.** No jobs, processors, or Redis queue wiring are
+  implemented yet; this remains deferred until M4.
+- **Storage abstraction is now wired in M3.** Attachment upload and signed-URL
+  download flow through a hand-rolled SigV4 client against the configured
+  S3-compatible endpoint (MinIO by default).
 - **Docker is postponed locally for now** on the current machine, but the repo must stay
-  Docker-ready for later milestones and final validation.
+  Docker-ready for later milestones and final validation. From M3 forward, live
+  attachment verification requires a reachable S3-compatible service (MinIO or
+  equivalent) and a pre-created `attachments` bucket. The automated integration
+  suite uses a mocked Prisma client and mocked `StorageService`, so passing CI
+  does not by itself prove the live storage path works end-to-end.
 - Until a milestone-specific spec says otherwise, **local non-Docker verification is
   acceptable in early milestones**.
 
@@ -550,12 +568,27 @@ Attachment
 
 ### Testing scope for M3
 
-- Unit: `isInternal` filtering — customer query never returns internal notes
-- Unit: file type and size validation in `StorageService`
-- Integration: `POST /tickets/:id/notes` returns 403 for customer role
-- Integration: `GET /tickets/:id/messages` for customer omits internal notes
-- Integration: attachment upload stores metadata, returns signed URL
-- Integration: unauthorized user cannot download attachment (403)
+- Unit/integration: `isInternal` filtering — customer timeline never returns
+  internal notes or `NOTE_ADDED`/`ATTACHMENT_ADDED` system events
+- Unit/integration: file type and size validation on the upload path
+- Integration: `POST /tickets/:id/internal-notes` returns 403 for customer role
+- Integration: `GET /tickets/:id/timeline` for customer omits internal notes
+- Integration: attachment upload stores metadata, writes an `ATTACHMENT_ADDED`
+  event, and returns safe metadata only
+- Integration: signed download URL is denied for customers requesting an
+  internal-note attachment, an unattached staff upload, or a cross-ticket
+  attachment, and is allowed for customers requesting a public-message
+  attachment and for staff requesting any visible attachment
+- Integration: attachment linking on reply/internal note rejects attachments
+  uploaded by a different user
+- Integration: metadata-persistence failure best-effort deletes the uploaded
+  object and surfaces a generic 500 instead of a raw Prisma/internal message
+- Verification posture: the M3 integration suite uses a mocked Prisma client
+  and a mocked `StorageService`, so it exercises business and privacy rules
+  but does not by itself verify the real Prisma queries or the live SigV4
+  signed-URL behavior. Live attachment verification against MinIO (or any
+  S3-compatible service) plus a pre-created `attachments` bucket remains a
+  local runtime requirement before the M3 demo is considered fully exercised.
 
 ### Deliverable
 

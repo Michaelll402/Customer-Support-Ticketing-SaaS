@@ -4,7 +4,7 @@ import { appRoutePaths, type AppRoutePath } from '@/lib/app-access';
 export const siteTitle = 'Support Workspace';
 
 export const siteSubtitle =
-  'Lean auth remains the session foundation, and Milestone 2 now includes the ticket list, customer ticket creation, and metadata-only ticket detail. Conversation and later workflow slices remain deferred.';
+  'Ticket lists, customer ticket creation, conversation threads, internal notes, and attachments are available. Later workflow slices remain deferred.';
 
 export interface AppNavigationItem {
   description?: string;
@@ -15,11 +15,11 @@ export interface AppNavigationItem {
 const appRouteDescriptions: Record<AppRoutePath, string> = {
   '/dashboard':
     'Dashboard metrics and SLA reporting remain deferred to Milestone 5.',
-  '/profile': 'Profile editing remains outside Milestone 1.',
+  '/profile': 'Profile editing remains deferred.',
   '/settings':
     'Admin configuration screens remain placeholder-only until Milestone 5.',
   '/tickets':
-    'Ticket list, filters, sorting, pagination, customer ticket creation, and metadata-only ticket detail are live in Milestone 2. Conversation stays deferred to Milestone 3.',
+    'Ticket list, filters, sorting, pagination, customer ticket creation, conversation, notes, and attachments are available.',
 };
 
 const appRouteLabelsByRole: Record<

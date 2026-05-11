@@ -32,7 +32,7 @@ export const SignUpForm = () => {
   const onSubmit = handleSubmit(async (values) => {
     const session = await registerMutation.mutateAsync(values);
 
-    router.push(resolvePostAuthPath(session.user.role));
+    router.replace(resolvePostAuthPath(session.user.role));
   });
 
   if (currentUserQuery.isLoading) {
@@ -57,7 +57,7 @@ export const SignUpForm = () => {
       alternateHref="/sign-in"
       alternateLabel="Sign in"
       alternatePrompt="Already have an account?"
-      description="Create a customer account for the support workspace. Registration stays lean in M1: no email verification, no password reset, and no extra session tables."
+      description="Create a customer account for the support workspace. Registration uses the backend cookie session and keeps account setup focused."
       eyebrow="Sign Up"
       title="Create your customer account"
     >

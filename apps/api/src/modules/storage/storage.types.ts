@@ -7,3 +7,8 @@ export interface StorageUploadInput {
 export interface StorageUploadResult {
   key: string;
 }
+
+export interface StorageSignedUrlResult {
+  expiresInSeconds: number;
+  url: string;
+}

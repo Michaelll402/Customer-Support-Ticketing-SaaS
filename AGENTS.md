@@ -17,7 +17,9 @@ Read these files before making changes:
 
 - Milestone 0 is complete and closed
 - Milestone 1 is complete and closed
-- Milestone 2 is complete and ready for the completion commit
+- Milestone 2 is complete and closed
+- Milestone 3 is functionally complete and ready for the completion commit
+- Milestone 4 has not started yet
 - M1 delivered:
   - `DB-01` identity schema for `Role` and `User`
   - `BE-01` lean auth foundation: register, login, logout, `/auth/me`, JWT cookie auth,
@@ -29,13 +31,33 @@ Read these files before making changes:
     `Tag`, `TicketTag`, and `TicketEvent`, plus demo seed data
   - `BE-02` ticket create/list/detail, read-only category options, and narrow
     customer-owned patch scope for subject/description edit plus close/reopen
-  - `FE-02` ticket list, customer ticket creation, metadata-only ticket detail,
-    and a clearly labeled Milestone 3 conversation placeholder
-- Milestone 3 has not started yet
-- The next required step is focused spec extraction for M3:
-  - `DB-03` conversation schema
-  - `BE-03` thread, notes, and attachments API
-  - `FE-03` conversation, notes, and attachments UI
+  - `FE-02` ticket list, customer ticket creation, metadata-only ticket detail
+- M3 delivered:
+  - `DB-03` conversation schema: `TicketMessage` (with `isInternal`), `Attachment`
+    (with nullable `messageId`, `uploadedById`, `storedKey`, `mimeType`,
+    `sizeBytes`), and three new `TicketEventType` values (`REPLIED`, `NOTE_ADDED`,
+    `ATTACHMENT_ADDED`)
+  - `BE-03` thread, notes, and attachments API:
+    - `POST /tickets/:id/replies`
+    - `POST /tickets/:id/internal-notes` (AGENT/MANAGER/ADMIN only)
+    - `POST /tickets/:id/attachments` (multipart, 10 MB cap, MIME allowlist)
+    - `GET /tickets/:ticketId/attachments/:attachmentId/download-url` (signed
+      short-lived URL; customers blocked from internal-note and unattached uploads)
+    - `GET /tickets/:id/timeline` (combined messages + system events; customers
+      never receive internal notes or `NOTE_ADDED`/`ATTACHMENT_ADDED` events)
+    - Attachment linking requires the actor to own the unattached upload
+    - Metadata-failure path deletes the uploaded object and surfaces a generic
+      `InternalServerErrorException` instead of raw internal errors
+  - `FE-03` conversation, notes, and attachments UI:
+    - Combined ticket timeline
+    - Public reply composer for any visible-ticket viewer
+    - Staff-only internal note composer
+    - Attachment upload with size/type validation and on-demand signed-URL download
+    - Composer state resets on ticketId/kind changes
+- The next required step is focused spec extraction for M4:
+  - `DB-04` notifications schema and workflow event expansions
+  - `BE-04` workflow actions, notification queue, realtime gateway
+  - `FE-04` workflow controls, notification center, realtime UX
 
 ## What M0 Already Delivered
 
@@ -49,7 +71,7 @@ Read these files before making changes:
 - Pino logging baseline
 - testing framework setup only
 - BullMQ scaffold only, not wired
-- storage abstraction scaffold only, not implemented
+- storage abstraction scaffold (now wired in M3 for attachments)
 
 ## Non-Negotiable Guardrails
 
@@ -70,14 +92,29 @@ Read these files before making changes:
 - M1 MUST NOT add password reset
 - M1 MUST NOT add email verification
 
-## Deferred Beyond M0
+## M3 Constraints
 
-- conversation thread and attachments
+- M3 adds the conversation thread, internal notes, attachments, and signed
+  download URLs only
+- Internal notes MUST never reach customers in any API response or UI surface
+- Customer signed-URL access MUST be denied for internal-note attachments and
+  unattached staff uploads
+- Attachment linking to a message MUST require `uploadedById === actorId`
+- Public replies are blocked on closed tickets; internal notes remain allowed on
+  closed tickets for staff
+- M3 MUST NOT add notifications, realtime/WebSockets, BullMQ jobs, SLA logic,
+  dashboards, admin CRUD, broad workflow controls, automatic status changes on
+  reply, attachment cleanup jobs, or email/chatbot/billing
+
+## Deferred Beyond M3
+
 - BullMQ jobs/processors and Redis queue wiring
-- storage/S3 implementation
-- realtime workflows
-- SLA logic
+- realtime workflows / WebSocket gateway
+- in-app notifications and notification center
+- SLA logic, deadlines, breach detection
 - dashboards and admin business features
+- workflow actions (assign/reassign, priority, tags, category, team transfer)
+- email inbox sync, chatbot, billing
 
 ## Docker Policy
 
@@ -85,6 +122,11 @@ Read these files before making changes:
 - Local Docker usage is postponed for now on this machine
 - Early milestone progress may use non-Docker verification when the active milestone docs allow it
 - Milestone-specific docs decide when infra-backed verification becomes required
+- **M3 attachment runtime verification requires a running S3-compatible service
+  (MinIO via the bundled Docker Compose stack, or any equivalent) plus a
+  pre-created `attachments` bucket.** The automated test suite uses a mocked
+  Prisma client and mocked `StorageService`, so passing CI does not by itself
+  prove the live storage path works end-to-end.
 
 ## Working Rules For Future Agents
 

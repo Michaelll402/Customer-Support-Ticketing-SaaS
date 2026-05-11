@@ -69,8 +69,8 @@ export const getApiErrorMessage = (
     return error.message;
   }
 
-  if (error instanceof Error) {
-    return error.message;
+  if (process.env.NODE_ENV === 'development') {
+    console.error('Non-API request error:', error);
   }
 
   return fallback;

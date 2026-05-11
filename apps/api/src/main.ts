@@ -11,6 +11,26 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { validationPipeOptions } from './common/validation/validation.pipe-options';
 import { AUTH_COOKIE_SECURITY_NAME } from './modules/auth/auth.constants';
 
+const LOCALHOST_HOSTNAMES = new Set(['localhost', '127.0.0.1']);
+
+const buildAllowedOrigins = (configuredOrigin: string): string[] => {
+  try {
+    const parsed = new URL(configuredOrigin);
+
+    if (!LOCALHOST_HOSTNAMES.has(parsed.hostname)) {
+      return [configuredOrigin];
+    }
+
+    const mirror = new URL(configuredOrigin);
+    mirror.hostname =
+      parsed.hostname === 'localhost' ? '127.0.0.1' : 'localhost';
+
+    return [parsed.origin, mirror.origin];
+  } catch {
+    return [configuredOrigin];
+  }
+};
+
 const bootstrap = async () => {
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true,
@@ -30,7 +50,7 @@ const bootstrap = async () => {
 
   app.enableCors({
     credentials: true,
-    origin: webOrigin,
+    origin: buildAllowedOrigins(webOrigin),
   });
 
   const swaggerDocument = SwaggerModule.createDocument(
@@ -38,7 +58,7 @@ const bootstrap = async () => {
     new DocumentBuilder()
       .setTitle('Customer Support Ticketing SaaS API')
       .setDescription(
-        'Milestone 1 auth foundation. Ticket and workflow business endpoints remain deferred.',
+        'Customer Support / Ticketing SaaS API. Auth, ticket core, conversation, internal notes, and attachments are implemented. Workflow actions, notifications, realtime, SLA, and dashboards remain deferred.',
       )
       .setVersion('0.1.0')
       .addCookieAuth(

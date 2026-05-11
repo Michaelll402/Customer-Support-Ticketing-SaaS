@@ -58,8 +58,7 @@ export const AppShell = ({ children }: AppShellProps) => {
             Confirming access to the workspace
           </h1>
           <p className="mt-3 text-sm leading-6 text-slate-600">
-            Frontend auth in M1 derives the current user from the backend cookie
-            via
+            Frontend auth derives the current user from the backend cookie via
             <code> /auth/me</code>.
           </p>
         </div>
@@ -119,7 +118,7 @@ export const AppShell = ({ children }: AppShellProps) => {
       <div className="mx-auto grid max-w-[1480px] gap-6 px-4 py-4 lg:grid-cols-[290px_1fr] lg:px-6 lg:py-6">
         <aside className="rounded-[2rem] border border-white/70 bg-white/90 p-6 shadow-[0_20px_80px_-45px_rgba(15,23,42,0.35)] backdrop-blur lg:sticky lg:top-6 lg:h-fit">
           <p className="text-xs font-semibold uppercase tracking-[0.32em] text-sky-700">
-            Auth shell
+            Support workspace
           </p>
           <h1 className="mt-4 text-2xl font-semibold tracking-tight text-slate-950">
             {siteTitle}
@@ -179,7 +178,7 @@ export const AppShell = ({ children }: AppShellProps) => {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.32em] text-sky-700">
-                  Milestone 2
+                  Workspace
                 </p>
                 <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">
                   {activeItem?.label ?? 'Workspace'}

@@ -414,9 +414,8 @@ export const TicketListPage = () => {
               Ticket list
             </h1>
             <p className="mt-3 text-sm leading-6 text-slate-600">
-              Milestone 2 now includes the live ticket list, customer create
-              flow, and metadata-only ticket detail. This page stays
-              backend-driven for visibility, filters, sorting, and pagination.
+              The ticket list stays backend-driven for visibility, filters,
+              sorting, and pagination.
             </p>
           </div>
 

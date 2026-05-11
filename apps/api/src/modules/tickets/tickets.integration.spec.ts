@@ -19,6 +19,7 @@ import { apiConfiguration } from '../../common/config/api.configuration';
 import { validateApiEnv } from '../../common/config/env.validation';
 import { validationPipeOptions } from '../../common/validation/validation.pipe-options';
 import { AuthModule } from '../auth/auth.module';
+import { StorageService } from '../storage/storage.service';
 import { TicketsModule } from './tickets.module';
 
 import type { INestApplication } from '@nestjs/common';
@@ -98,6 +99,28 @@ interface StoredTicketEvent {
   type: TicketEventType;
 }
 
+interface StoredTicketMessage {
+  authorId: string;
+  body: string;
+  createdAt: Date;
+  id: string;
+  isInternal: boolean;
+  ticketId: string;
+  updatedAt: Date;
+}
+
+interface StoredAttachment {
+  createdAt: Date;
+  filename: string;
+  id: string;
+  messageId: string | null;
+  mimeType: string;
+  sizeBytes: number;
+  storedKey: string;
+  ticketId: string;
+  uploadedById: string;
+}
+
 type TicketIncludeArgs = {
   include?: {
     assignee?: {
@@ -143,6 +166,108 @@ type UpdateArgs = {
   };
 } & TicketIncludeArgs;
 
+type TicketMessageCreateArgs = {
+  data: {
+    authorId: string;
+    body: string;
+    isInternal: boolean;
+    ticketId: string;
+  };
+  include?: {
+    author?: {
+      select?: Record<string, boolean>;
+    };
+  };
+};
+
+type TicketMessageFindManyArgs = {
+  where?: {
+    isInternal?: boolean;
+    ticketId?: string;
+  };
+  include?: {
+    author?: {
+      select?: Record<string, boolean>;
+    };
+  };
+  orderBy?: {
+    createdAt?: Prisma.SortOrder;
+  };
+};
+
+type TicketEventFindManyArgs = {
+  where?: {
+    NOT?: {
+      type?:
+        | TicketEventType
+        | {
+            in?: TicketEventType[];
+          };
+    };
+    ticketId?: string;
+  };
+  include?: {
+    actor?: {
+      select?: Record<string, boolean>;
+    };
+  };
+  orderBy?: {
+    createdAt?: Prisma.SortOrder;
+  };
+};
+
+type AttachmentCreateArgs = {
+  data: {
+    filename: string;
+    messageId: string | null;
+    mimeType: string;
+    sizeBytes: number;
+    storedKey: string;
+    ticketId: string;
+    uploadedById: string;
+  };
+};
+
+type AttachmentFindFirstArgs = {
+  include?: {
+    message?: {
+      select?: Record<string, boolean>;
+    };
+  };
+  where?: {
+    id?: string;
+    ticketId?: string;
+  };
+};
+
+type AttachmentFindManyArgs = {
+  orderBy?: {
+    createdAt?: Prisma.SortOrder;
+  };
+  where?: {
+    id?: {
+      in?: string[];
+    };
+    messageId?: string | null;
+    ticketId?: string;
+    uploadedById?: string;
+  };
+};
+
+type AttachmentUpdateManyArgs = {
+  data: {
+    messageId: string;
+  };
+  where?: {
+    id?: {
+      in?: string[];
+    };
+    messageId?: string | null;
+    ticketId?: string;
+    uploadedById?: string;
+  };
+};
+
 const createPrismaMock = () => {
   const roles: StoredRole[] = Object.values(RoleName).map((name, index) => ({
     id: `role-${index + 1}`,
@@ -156,6 +281,8 @@ const createPrismaMock = () => {
   const tickets: StoredTicket[] = [];
   const ticketTags: StoredTicketTag[] = [];
   const ticketEvents: StoredTicketEvent[] = [];
+  const ticketMessages: StoredTicketMessage[] = [];
+  const attachments: StoredAttachment[] = [];
   let nextTicketNumber = 1000;
   const priorityRank: Record<TicketPriority, number> = {
     [TicketPriority.LOW]: 1,
@@ -429,6 +556,27 @@ const createPrismaMock = () => {
     ),
   };
 
+  const teamModel = {
+    findUnique: vi.fn(
+      async ({
+        where,
+      }: {
+        where: {
+          id?: string;
+          name?: string;
+        };
+      }) => {
+        if (where.name !== undefined) {
+          return teams.find((team) => team.name === where.name) ?? null;
+        }
+        if (where.id !== undefined) {
+          return teams.find((team) => team.id === where.id) ?? null;
+        }
+        return null;
+      },
+    ),
+  };
+
   const ticketModel = {
     count: vi.fn(
       async ({
@@ -455,6 +603,7 @@ const createPrismaMock = () => {
           requesterId: string;
           status: TicketStatus;
           subject: string;
+          teamId?: string | null;
         };
       } & TicketIncludeArgs) => {
         const now = new Date();
@@ -471,7 +620,7 @@ const createPrismaMock = () => {
           resolutionDueAt: null,
           status: data.status,
           subject: data.subject,
-          teamId: null,
+          teamId: data.teamId ?? null,
           updatedAt: now,
         };
 
@@ -564,18 +713,327 @@ const createPrismaMock = () => {
     ),
   };
 
+  const ticketMessageModel = {
+    create: vi.fn(async ({ data }: TicketMessageCreateArgs) => {
+      const ticket = tickets.find((entry) => entry.id === data.ticketId);
+      const author = users.find((user) => user.id === data.authorId);
+
+      if (!ticket) {
+        throw new Error('Ticket not found in test store.');
+      }
+
+      if (!author) {
+        throw new Error('Author not found in test store.');
+      }
+
+      const now = new Date();
+      const message: StoredTicketMessage = {
+        authorId: data.authorId,
+        body: data.body,
+        createdAt: now,
+        id: randomUUID(),
+        isInternal: data.isInternal,
+        ticketId: data.ticketId,
+        updatedAt: now,
+      };
+
+      ticketMessages.push(message);
+
+      return {
+        ...message,
+        attachments: [],
+        author,
+      };
+    }),
+    findMany: vi.fn(
+      async ({ orderBy, where }: TicketMessageFindManyArgs = {}) => {
+        const results = ticketMessages
+          .filter((message) => {
+            if (where?.ticketId && message.ticketId !== where.ticketId) {
+              return false;
+            }
+
+            if (
+              where?.isInternal !== undefined &&
+              message.isInternal !== where.isInternal
+            ) {
+              return false;
+            }
+
+            return true;
+          })
+          .map((message) => {
+            const author = users.find((user) => user.id === message.authorId);
+
+            if (!author) {
+              throw new Error('Message author not found in test store.');
+            }
+
+            return {
+              ...message,
+              attachments: attachments.filter(
+                (attachment) => attachment.messageId === message.id,
+              ),
+              author,
+            };
+          });
+
+        if (orderBy?.createdAt) {
+          results.sort((left, right) =>
+            orderBy.createdAt === 'asc'
+              ? left.createdAt.getTime() - right.createdAt.getTime()
+              : right.createdAt.getTime() - left.createdAt.getTime(),
+          );
+        }
+
+        return results;
+      },
+    ),
+  };
+
+  const ticketEventModel = {
+    create: vi.fn(
+      async ({
+        data,
+      }: {
+        data: {
+          actorId: string | null;
+          metadata?: Prisma.JsonValue;
+          ticketId: string;
+          type: TicketEventType;
+        };
+      }) => {
+        const event: StoredTicketEvent = {
+          actorId: data.actorId,
+          createdAt: new Date(),
+          id: randomUUID(),
+          metadata: data.metadata ?? null,
+          ticketId: data.ticketId,
+          type: data.type,
+        };
+
+        ticketEvents.push(event);
+
+        return event;
+      },
+    ),
+    findMany: vi.fn(
+      async ({ orderBy, where }: TicketEventFindManyArgs = {}) => {
+        const results = ticketEvents
+          .filter((event) => {
+            if (where?.ticketId && event.ticketId !== where.ticketId) {
+              return false;
+            }
+
+            if (where?.NOT?.type) {
+              if (
+                typeof where.NOT.type === 'object' &&
+                where.NOT.type.in?.includes(event.type)
+              ) {
+                return false;
+              }
+
+              if (
+                typeof where.NOT.type === 'string' &&
+                event.type === where.NOT.type
+              ) {
+                return false;
+              }
+            }
+
+            return true;
+          })
+          .map((event) => {
+            const actor = event.actorId
+              ? (users.find((user) => user.id === event.actorId) ?? null)
+              : null;
+
+            return {
+              ...event,
+              actor,
+            };
+          });
+
+        if (orderBy?.createdAt) {
+          results.sort((left, right) =>
+            orderBy.createdAt === 'asc'
+              ? left.createdAt.getTime() - right.createdAt.getTime()
+              : right.createdAt.getTime() - left.createdAt.getTime(),
+          );
+        }
+
+        return results;
+      },
+    ),
+  };
+
+  const attachmentModel = {
+    create: vi.fn(async ({ data }: AttachmentCreateArgs) => {
+      const ticket = tickets.find((entry) => entry.id === data.ticketId);
+      const uploader = users.find((user) => user.id === data.uploadedById);
+
+      if (!ticket) {
+        throw new Error('Ticket not found in test store.');
+      }
+
+      if (!uploader) {
+        throw new Error('Uploader not found in test store.');
+      }
+
+      const attachment: StoredAttachment = {
+        createdAt: new Date(),
+        filename: data.filename,
+        id: randomUUID(),
+        messageId: data.messageId,
+        mimeType: data.mimeType,
+        sizeBytes: data.sizeBytes,
+        storedKey: data.storedKey,
+        ticketId: data.ticketId,
+        uploadedById: data.uploadedById,
+      };
+
+      attachments.push(attachment);
+
+      return attachment;
+    }),
+    findFirst: vi.fn(
+      async ({ include, where }: AttachmentFindFirstArgs = {}) => {
+        const attachment =
+          attachments.find((entry) => {
+            if (where?.id && entry.id !== where.id) {
+              return false;
+            }
+
+            if (where?.ticketId && entry.ticketId !== where.ticketId) {
+              return false;
+            }
+
+            return true;
+          }) ?? null;
+
+        if (!attachment) {
+          return null;
+        }
+
+        if (!include?.message) {
+          return attachment;
+        }
+
+        return {
+          ...attachment,
+          message: attachment.messageId
+            ? (ticketMessages.find(
+                (message) => message.id === attachment.messageId,
+              ) ?? null)
+            : null,
+        };
+      },
+    ),
+    findMany: vi.fn(async ({ orderBy, where }: AttachmentFindManyArgs = {}) => {
+      const results = attachments.filter((attachment) => {
+        if (where?.id?.in && !where.id.in.includes(attachment.id)) {
+          return false;
+        }
+
+        if (
+          where?.messageId !== undefined &&
+          attachment.messageId !== where.messageId
+        ) {
+          return false;
+        }
+
+        if (where?.ticketId && attachment.ticketId !== where.ticketId) {
+          return false;
+        }
+
+        if (
+          where?.uploadedById &&
+          attachment.uploadedById !== where.uploadedById
+        ) {
+          return false;
+        }
+
+        return true;
+      });
+
+      if (orderBy?.createdAt) {
+        results.sort((left, right) =>
+          orderBy.createdAt === 'asc'
+            ? left.createdAt.getTime() - right.createdAt.getTime()
+            : right.createdAt.getTime() - left.createdAt.getTime(),
+        );
+      }
+
+      return results;
+    }),
+    updateMany: vi.fn(async ({ data, where }: AttachmentUpdateManyArgs) => {
+      let count = 0;
+
+      for (const attachment of attachments) {
+        if (where?.id?.in && !where.id.in.includes(attachment.id)) {
+          continue;
+        }
+
+        if (
+          where?.messageId !== undefined &&
+          attachment.messageId !== where.messageId
+        ) {
+          continue;
+        }
+
+        if (where?.ticketId && attachment.ticketId !== where.ticketId) {
+          continue;
+        }
+
+        if (
+          where?.uploadedById &&
+          attachment.uploadedById !== where.uploadedById
+        ) {
+          continue;
+        }
+
+        attachment.messageId = data.messageId;
+        count += 1;
+      }
+
+      return {
+        count,
+      };
+    }),
+  };
+
   return {
+    $transaction: vi.fn(
+      async <T>(
+        callback: (client: {
+          attachment: typeof attachmentModel;
+          ticketEvent: typeof ticketEventModel;
+          ticketMessage: typeof ticketMessageModel;
+        }) => Promise<T>,
+      ) =>
+        callback({
+          attachment: attachmentModel,
+          ticketEvent: ticketEventModel,
+          ticketMessage: ticketMessageModel,
+        }),
+    ),
+    attachmentStore: attachments,
+    attachment: attachmentModel,
     categoryStore: categories,
     roleStore: roles,
     tagStore: tags,
     teamMemberStore: teamMembers,
     teamStore: teams,
     ticketEventStore: ticketEvents,
+    ticketMessageStore: ticketMessages,
     ticketStore: tickets,
     ticketTagStore: ticketTags,
     userStore: users,
     category: categoryModel,
+    team: teamModel,
     ticket: ticketModel,
+    ticketEvent: ticketEventModel,
+    ticketMessage: ticketMessageModel,
     user: userModel,
   };
 };
@@ -584,6 +1042,11 @@ describe('Tickets integration', () => {
   let app: INestApplication;
   let prismaMock: ReturnType<typeof createPrismaMock>;
   let originalEnv: NodeJS.ProcessEnv;
+  let storageMock: {
+    delete: ReturnType<typeof vi.fn>;
+    getSignedUrl: ReturnType<typeof vi.fn>;
+    upload: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(async () => {
     originalEnv = { ...process.env };
@@ -594,11 +1057,27 @@ describe('Tickets integration', () => {
       'postgresql://postgres:postgres@localhost:5432/customer_support?schema=public';
     process.env.JWT_ACCESS_TOKEN_TTL_SECONDS = '3600';
     process.env.JWT_SECRET = 'test-ticket-secret';
+    process.env.MINIO_ACCESS_KEY = 'minioadmin';
+    process.env.MINIO_BUCKET = 'customer-support';
+    process.env.MINIO_ENDPOINT = 'localhost';
+    process.env.MINIO_PORT = '9000';
+    process.env.MINIO_SECRET_KEY = 'minioadmin';
+    process.env.MINIO_USE_SSL = 'false';
     process.env.NODE_ENV = 'test';
     process.env.SWAGGER_PATH = 'api';
     process.env.WEB_APP_ORIGIN = 'http://localhost:3000';
 
     prismaMock = createPrismaMock();
+    storageMock = {
+      delete: vi.fn().mockResolvedValue(undefined),
+      getSignedUrl: vi.fn().mockResolvedValue({
+        expiresInSeconds: 300,
+        url: 'http://localhost:9000/customer-support/signed-download-url',
+      }),
+      upload: vi.fn().mockResolvedValue({
+        key: 'tickets/test/attachments/file.txt',
+      }),
+    };
 
     const technicalTeam: StoredTeam = {
       createdAt: new Date('2026-04-20T10:00:00.000Z'),
@@ -634,6 +1113,15 @@ describe('Tickets integration', () => {
       name: 'Billing',
     };
     prismaMock.teamStore.push(billingTeam);
+
+    const accountAccessCategory: StoredCategory = {
+      color: '#7c3aed',
+      createdAt: new Date('2026-04-20T10:15:00.000Z'),
+      description: 'Login, MFA, password reset, and account access problems.',
+      id: randomUUID(),
+      name: 'Account Access',
+    };
+    prismaMock.categoryStore.push(accountAccessCategory);
 
     const urgentTag: StoredTag = {
       color: '#dc2626',
@@ -876,6 +1364,8 @@ describe('Tickets integration', () => {
     })
       .overrideProvider(PrismaService)
       .useValue(prismaMock as unknown as PrismaService)
+      .overrideProvider(StorageService)
+      .useValue(storageMock)
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -895,6 +1385,9 @@ describe('Tickets integration', () => {
   it('allows an authenticated customer to create a ticket and writes a CREATED event', async () => {
     const agent = request.agent(app.getHttpServer());
     const category = prismaMock.categoryStore[0]!;
+    const technicalTeam = prismaMock.teamStore.find(
+      (team) => team.name === 'Technical Support',
+    )!;
     const customer = prismaMock.userStore.find(
       (user) => user.email === 'customer@demo.test',
     )!;
@@ -932,7 +1425,11 @@ describe('Tickets integration', () => {
         lastName: 'Customer',
       },
       assignee: null,
-      team: null,
+      team: {
+        id: technicalTeam.id,
+        name: technicalTeam.name,
+        description: technicalTeam.description,
+      },
       category: {
         id: category.id,
         name: category.name,
@@ -954,6 +1451,206 @@ describe('Tickets integration', () => {
           event.ticketId === response.body.id,
       ),
     ).toBe(true);
+  });
+
+  it('auto-routes a customer-created ticket with the Billing category to the Billing team', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const billingCategory = prismaMock.categoryStore.find(
+      (entry) => entry.name === 'Billing',
+    )!;
+    const billingTeam = prismaMock.teamStore.find(
+      (team) => team.name === 'Billing',
+    )!;
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    const response = await agent
+      .post('/tickets')
+      .send({
+        categoryId: billingCategory.id,
+        description: 'Invoice shows a duplicate subscription charge.',
+        priority: TicketPriority.HIGH,
+        subject: 'Duplicate charge on invoice',
+      })
+      .expect(201);
+
+    expect(response.body.team).toEqual({
+      id: billingTeam.id,
+      name: billingTeam.name,
+      description: billingTeam.description,
+    });
+    expect(response.body.assignee).toBeNull();
+
+    const stored = prismaMock.ticketStore.find(
+      (ticket) => ticket.id === response.body.id,
+    );
+    expect(stored?.teamId).toBe(billingTeam.id);
+    expect(stored?.assigneeId).toBeNull();
+  });
+
+  it('auto-routes a customer-created ticket with the Account Access category to the Technical Support team', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const accountAccessCategory = prismaMock.categoryStore.find(
+      (entry) => entry.name === 'Account Access',
+    )!;
+    const technicalTeam = prismaMock.teamStore.find(
+      (team) => team.name === 'Technical Support',
+    )!;
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    const response = await agent
+      .post('/tickets')
+      .send({
+        categoryId: accountAccessCategory.id,
+        description: 'Password reset loop blocks sign-in.',
+        priority: TicketPriority.HIGH,
+        subject: 'Cannot complete password reset',
+      })
+      .expect(201);
+
+    expect(response.body.team).toEqual({
+      id: technicalTeam.id,
+      name: technicalTeam.name,
+      description: technicalTeam.description,
+    });
+    expect(response.body.assignee).toBeNull();
+
+    const stored = prismaMock.ticketStore.find(
+      (ticket) => ticket.id === response.body.id,
+    );
+    expect(stored?.teamId).toBe(technicalTeam.id);
+  });
+
+  it('auto-routes an uncategorized customer-created ticket to the Technical Support team', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const technicalTeam = prismaMock.teamStore.find(
+      (team) => team.name === 'Technical Support',
+    )!;
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    const response = await agent
+      .post('/tickets')
+      .send({
+        description: 'Generic issue without a category.',
+        priority: TicketPriority.MEDIUM,
+        subject: 'Uncategorized support request',
+      })
+      .expect(201);
+
+    expect(response.body.team).toEqual({
+      id: technicalTeam.id,
+      name: technicalTeam.name,
+      description: technicalTeam.description,
+    });
+    expect(response.body.category).toBeNull();
+    expect(response.body.assignee).toBeNull();
+
+    const stored = prismaMock.ticketStore.find(
+      (ticket) => ticket.id === response.body.id,
+    );
+    expect(stored?.teamId).toBe(technicalTeam.id);
+    expect(stored?.categoryId).toBeNull();
+  });
+
+  it('falls back to teamId=null when the resolved team does not exist in the workspace', async () => {
+    const technicalTeamIndex = prismaMock.teamStore.findIndex(
+      (team) => team.name === 'Technical Support',
+    );
+    expect(technicalTeamIndex).toBeGreaterThanOrEqual(0);
+    prismaMock.teamStore.splice(technicalTeamIndex, 1);
+
+    const agent = request.agent(app.getHttpServer());
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    const response = await agent
+      .post('/tickets')
+      .send({
+        description: 'Ticket created when the default routing team is absent.',
+        priority: TicketPriority.LOW,
+        subject: 'Uncategorized ticket without a default team',
+      })
+      .expect(201);
+
+    expect(response.body.team).toBeNull();
+    expect(response.body.assignee).toBeNull();
+
+    const stored = prismaMock.ticketStore.find(
+      (ticket) => ticket.id === response.body.id,
+    );
+    expect(stored?.teamId).toBeNull();
+  });
+
+  it('makes a newly customer-created Technical Issue ticket visible to a Technical Support team manager', async () => {
+    const customerAgent = request.agent(app.getHttpServer());
+    const managerAgent = request.agent(app.getHttpServer());
+    const technicalCategory = prismaMock.categoryStore.find(
+      (entry) => entry.name === 'Technical Issue',
+    )!;
+    const technicalTeam = prismaMock.teamStore.find(
+      (team) => team.name === 'Technical Support',
+    )!;
+
+    await customerAgent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    const createResponse = await customerAgent
+      .post('/tickets')
+      .send({
+        categoryId: technicalCategory.id,
+        description: 'Storefront API returns a 500 for integration traffic.',
+        priority: TicketPriority.HIGH,
+        subject: 'Checkout API regression',
+      })
+      .expect(201);
+
+    expect(createResponse.body.team?.id).toBe(technicalTeam.id);
+
+    await managerAgent
+      .post('/auth/login')
+      .send({
+        email: 'manager@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    const detailResponse = await managerAgent
+      .get(`/tickets/${createResponse.body.id}`)
+      .expect(200);
+
+    expect(detailResponse.body.id).toBe(createResponse.body.id);
+    expect(detailResponse.body.team?.id).toBe(technicalTeam.id);
   });
 
   it('rejects invalid create payloads with validation errors', async () => {
@@ -1013,7 +1710,17 @@ describe('Tickets integration', () => {
 
     const response = await agent.get('/tickets/categories').expect(200);
 
+    const accountAccessCategory = prismaMock.categoryStore.find(
+      (entry) => entry.name === 'Account Access',
+    )!;
+
     expect(response.body).toEqual([
+      {
+        id: accountAccessCategory.id,
+        name: 'Account Access',
+        description: 'Login, MFA, password reset, and account access problems.',
+        color: '#7c3aed',
+      },
       {
         id: prismaMock.categoryStore[1]!.id,
         name: 'Billing',
@@ -1490,5 +2197,1222 @@ describe('Tickets integration', () => {
       .expect(400);
 
     await agent.patch(`/tickets/${ownTicket.id}`).send({}).expect(400);
+  });
+
+  it('allows a customer to add a public reply to their own non-closed ticket and writes a REPLIED event', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+    const customer = prismaMock.userStore.find(
+      (user) => user.email === 'customer@demo.test',
+    )!;
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    const response = await agent
+      .post(`/tickets/${ownTicket.id}/replies`)
+      .send({
+        body: '  I can still reproduce this on my account.  ',
+      })
+      .expect(201);
+
+    expect(response.body).toEqual({
+      id: expect.any(String),
+      ticketId: ownTicket.id,
+      author: {
+        id: customer.id,
+        email: customer.email,
+        firstName: customer.firstName,
+        lastName: customer.lastName,
+      },
+      body: 'I can still reproduce this on my account.',
+      isInternal: false,
+      attachments: [],
+      createdAt: expect.any(String),
+      updatedAt: expect.any(String),
+    });
+    expect(ownTicket.status).toBe(TicketStatus.OPEN);
+    expect(
+      prismaMock.ticketMessageStore.some(
+        (message) =>
+          message.id === response.body.id &&
+          message.ticketId === ownTicket.id &&
+          message.authorId === customer.id &&
+          !message.isInternal,
+      ),
+    ).toBe(true);
+    expect(
+      prismaMock.ticketEventStore.some(
+        (event) =>
+          event.ticketId === ownTicket.id &&
+          event.actorId === customer.id &&
+          event.type === TicketEventType.REPLIED,
+      ),
+    ).toBe(true);
+  });
+
+  it('allows staff to add a public reply to a visible non-closed ticket', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const teamTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Team queue ticket',
+    )!;
+    const staffUser = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
+    )!;
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'agent@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    const response = await agent
+      .post(`/tickets/${teamTicket.id}/replies`)
+      .send({
+        body: 'We are investigating this ticket now.',
+      })
+      .expect(201);
+
+    expect(response.body).toMatchObject({
+      ticketId: teamTicket.id,
+      author: {
+        email: 'agent@demo.test',
+      },
+      body: 'We are investigating this ticket now.',
+      isInternal: false,
+    });
+    expect(teamTicket.status).toBe(TicketStatus.PENDING);
+    expect(
+      prismaMock.ticketEventStore.some(
+        (event) =>
+          event.ticketId === teamTicket.id &&
+          event.actorId === staffUser.id &&
+          event.type === TicketEventType.REPLIED,
+      ),
+    ).toBe(true);
+  });
+
+  it('returns 403 when a customer tries to reply to another customer ticket', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const otherTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Other customer ticket',
+    )!;
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    await agent
+      .post(`/tickets/${otherTicket.id}/replies`)
+      .send({
+        body: 'This should be rejected.',
+      })
+      .expect(403);
+
+    expect(prismaMock.ticketMessageStore).toHaveLength(0);
+  });
+
+  it('returns 400 when anyone tries to public-reply to a closed ticket', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const closedTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Assigned ticket',
+    )!;
+    closedTicket.status = TicketStatus.CLOSED;
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'agent@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    await agent
+      .post(`/tickets/${closedTicket.id}/replies`)
+      .send({
+        body: 'This public reply should not be allowed on a closed ticket.',
+      })
+      .expect(400);
+
+    expect(
+      prismaMock.ticketMessageStore.some(
+        (message) => message.ticketId === closedTicket.id,
+      ),
+    ).toBe(false);
+    expect(closedTicket.status).toBe(TicketStatus.CLOSED);
+  });
+
+  it('allows staff to add an internal note to a visible closed ticket without changing status', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const closedTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Assigned ticket',
+    )!;
+    closedTicket.status = TicketStatus.CLOSED;
+    const staffUser = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
+    )!;
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'agent@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    const response = await agent
+      .post(`/tickets/${closedTicket.id}/internal-notes`)
+      .send({
+        body: 'Internal close-out note for support history.',
+      })
+      .expect(201);
+
+    expect(response.body).toMatchObject({
+      ticketId: closedTicket.id,
+      author: {
+        email: 'agent@demo.test',
+      },
+      body: 'Internal close-out note for support history.',
+      isInternal: true,
+    });
+    expect(closedTicket.status).toBe(TicketStatus.CLOSED);
+    expect(
+      prismaMock.ticketEventStore.some(
+        (event) =>
+          event.ticketId === closedTicket.id &&
+          event.actorId === staffUser.id &&
+          event.type === TicketEventType.NOTE_ADDED,
+      ),
+    ).toBe(true);
+  });
+
+  it('returns 403 when a customer tries to create an internal note', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    await agent
+      .post(`/tickets/${ownTicket.id}/internal-notes`)
+      .send({
+        body: 'Customers must not create internal notes.',
+      })
+      .expect(403);
+
+    expect(prismaMock.ticketMessageStore).toHaveLength(0);
+  });
+
+  it('returns 403 when staff tries to create an internal note on a ticket outside visibility', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const billingTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Billing queue ticket',
+    )!;
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'agent@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    await agent
+      .post(`/tickets/${billingTicket.id}/internal-notes`)
+      .send({
+        body: 'This note should not be allowed outside team visibility.',
+      })
+      .expect(403);
+
+    expect(prismaMock.ticketMessageStore).toHaveLength(0);
+  });
+
+  it('validates reply attachmentIds without rejecting the optional field itself', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+    const duplicateAttachmentId = randomUUID();
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    await agent
+      .post(`/tickets/${ownTicket.id}/replies`)
+      .send({
+        body: '',
+      })
+      .expect(400);
+
+    await agent
+      .post(`/tickets/${ownTicket.id}/replies`)
+      .send({
+        body: 'Attachment IDs are intentionally deferred to a later BE-03 slice.',
+        attachmentIds: ['not-a-uuid'],
+      })
+      .expect(400);
+
+    await agent
+      .post(`/tickets/${ownTicket.id}/replies`)
+      .send({
+        body: 'Duplicate attachment IDs should be rejected.',
+        attachmentIds: [duplicateAttachmentId, duplicateAttachmentId],
+      })
+      .expect(400);
+  });
+
+  it('links uploaded attachments to a new public reply and returns safe attachment metadata', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+    const customer = prismaMock.userStore.find(
+      (user) => user.email === 'customer@demo.test',
+    )!;
+    const attachmentId = randomUUID();
+
+    prismaMock.attachmentStore.push({
+      createdAt: new Date('2026-04-21T12:00:00.000Z'),
+      filename: 'customer screenshot.png',
+      id: attachmentId,
+      messageId: null,
+      mimeType: 'image/png',
+      sizeBytes: 4096,
+      storedKey: `tickets/${ownTicket.id}/attachments/customer-screenshot.png`,
+      ticketId: ownTicket.id,
+      uploadedById: customer.id,
+    });
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    const response = await agent
+      .post(`/tickets/${ownTicket.id}/replies`)
+      .send({
+        body: 'Screenshot attached for context.',
+        attachmentIds: [attachmentId],
+      })
+      .expect(201);
+
+    expect(response.body).toMatchObject({
+      id: expect.any(String),
+      ticketId: ownTicket.id,
+      body: 'Screenshot attached for context.',
+      isInternal: false,
+      attachments: [
+        {
+          id: attachmentId,
+          ticketId: ownTicket.id,
+          messageId: response.body.id,
+          uploadedById: customer.id,
+          filename: 'customer screenshot.png',
+          mimeType: 'image/png',
+          sizeBytes: 4096,
+          createdAt: '2026-04-21T12:00:00.000Z',
+        },
+      ],
+    });
+    expect(response.body.attachments[0].storedKey).toBeUndefined();
+    expect(prismaMock.attachmentStore[0]!.messageId).toBe(response.body.id);
+  });
+
+  it('rejects a customer linking another user upload on the same ticket to a public reply', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+    const staffUser = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
+    )!;
+    const staffAttachmentId = randomUUID();
+
+    prismaMock.attachmentStore.push({
+      createdAt: new Date('2026-04-21T12:03:00.000Z'),
+      filename: 'staff unattached upload.txt',
+      id: staffAttachmentId,
+      messageId: null,
+      mimeType: 'text/plain',
+      sizeBytes: 32,
+      storedKey: `tickets/${ownTicket.id}/attachments/staff-unattached-upload.txt`,
+      ticketId: ownTicket.id,
+      uploadedById: staffUser.id,
+    });
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    await agent
+      .post(`/tickets/${ownTicket.id}/replies`)
+      .send({
+        body: 'Trying to link a staff upload by ID.',
+        attachmentIds: [staffAttachmentId],
+      })
+      .expect(400);
+
+    expect(prismaMock.ticketMessageStore).toHaveLength(0);
+    expect(prismaMock.attachmentStore[0]!.messageId).toBeNull();
+  });
+
+  it('rejects cross-ticket and already-linked attachments when creating a message', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+    const otherTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Other customer ticket',
+    )!;
+    const customer = prismaMock.userStore.find(
+      (user) => user.email === 'customer@demo.test',
+    )!;
+    const crossTicketAttachmentId = randomUUID();
+    const alreadyLinkedAttachmentId = randomUUID();
+
+    prismaMock.attachmentStore.push(
+      {
+        createdAt: new Date('2026-04-21T12:05:00.000Z'),
+        filename: 'other-ticket.txt',
+        id: crossTicketAttachmentId,
+        messageId: null,
+        mimeType: 'text/plain',
+        sizeBytes: 12,
+        storedKey: `tickets/${otherTicket.id}/attachments/other-ticket.txt`,
+        ticketId: otherTicket.id,
+        uploadedById: customer.id,
+      },
+      {
+        createdAt: new Date('2026-04-21T12:10:00.000Z'),
+        filename: 'already-linked.txt',
+        id: alreadyLinkedAttachmentId,
+        messageId: randomUUID(),
+        mimeType: 'text/plain',
+        sizeBytes: 14,
+        storedKey: `tickets/${ownTicket.id}/attachments/already-linked.txt`,
+        ticketId: ownTicket.id,
+        uploadedById: customer.id,
+      },
+    );
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    await agent
+      .post(`/tickets/${ownTicket.id}/replies`)
+      .send({
+        body: 'Cross-ticket attachment must fail.',
+        attachmentIds: [crossTicketAttachmentId],
+      })
+      .expect(400);
+
+    await agent
+      .post(`/tickets/${ownTicket.id}/replies`)
+      .send({
+        body: 'Already-linked attachment must fail.',
+        attachmentIds: [alreadyLinkedAttachmentId],
+      })
+      .expect(400);
+
+    expect(
+      prismaMock.ticketMessageStore.some((message) =>
+        [
+          'Cross-ticket attachment must fail.',
+          'Already-linked attachment must fail.',
+        ].includes(message.body),
+      ),
+    ).toBe(false);
+  });
+
+  it('links attachments to internal notes without exposing them to customer timelines', async () => {
+    const staffAgent = request.agent(app.getHttpServer());
+    const customerAgent = request.agent(app.getHttpServer());
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+    ownTicket.teamId = prismaMock.teamStore.find(
+      (team) => team.name === 'Technical Support',
+    )!.id;
+    const staffUser = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
+    )!;
+    const publicAttachmentId = randomUUID();
+    const internalAttachmentId = randomUUID();
+
+    prismaMock.attachmentStore.push(
+      {
+        createdAt: new Date('2026-04-21T13:00:00.000Z'),
+        filename: 'public transcript.txt',
+        id: publicAttachmentId,
+        messageId: null,
+        mimeType: 'text/plain',
+        sizeBytes: 24,
+        storedKey: `tickets/${ownTicket.id}/attachments/public-transcript.txt`,
+        ticketId: ownTicket.id,
+        uploadedById: staffUser.id,
+      },
+      {
+        createdAt: new Date('2026-04-21T13:05:00.000Z'),
+        filename: 'internal diagnostics.txt',
+        id: internalAttachmentId,
+        messageId: null,
+        mimeType: 'text/plain',
+        sizeBytes: 32,
+        storedKey: `tickets/${ownTicket.id}/attachments/internal-diagnostics.txt`,
+        ticketId: ownTicket.id,
+        uploadedById: staffUser.id,
+      },
+    );
+
+    await staffAgent
+      .post('/auth/login')
+      .send({
+        email: 'agent@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    await staffAgent
+      .post(`/tickets/${ownTicket.id}/replies`)
+      .send({
+        body: 'Public reply with attachment.',
+        attachmentIds: [publicAttachmentId],
+      })
+      .expect(201);
+
+    await staffAgent
+      .post(`/tickets/${ownTicket.id}/internal-notes`)
+      .send({
+        body: 'Internal note with attachment.',
+        attachmentIds: [internalAttachmentId],
+      })
+      .expect(201);
+
+    await customerAgent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    const customerTimelineResponse = await customerAgent
+      .get(`/tickets/${ownTicket.id}/timeline`)
+      .expect(200);
+
+    expect(
+      customerTimelineResponse.body.items.some(
+        (item: { body?: string }) =>
+          item.body === 'Internal note with attachment.',
+      ),
+    ).toBe(false);
+    expect(JSON.stringify(customerTimelineResponse.body)).toContain(
+      'public transcript.txt',
+    );
+    expect(JSON.stringify(customerTimelineResponse.body)).not.toContain(
+      'internal diagnostics.txt',
+    );
+
+    const staffTimelineResponse = await staffAgent
+      .get(`/tickets/${ownTicket.id}/timeline`)
+      .expect(200);
+
+    expect(JSON.stringify(staffTimelineResponse.body)).toContain(
+      'public transcript.txt',
+    );
+    expect(JSON.stringify(staffTimelineResponse.body)).toContain(
+      'internal diagnostics.txt',
+    );
+  });
+
+  it('returns a customer-visible timeline without internal notes or NOTE_ADDED events', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+    const customer = prismaMock.userStore.find(
+      (user) => user.email === 'customer@demo.test',
+    )!;
+    const staffUser = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
+    )!;
+
+    prismaMock.ticketEventStore.push(
+      {
+        actorId: customer.id,
+        createdAt: new Date('2026-04-21T10:00:00.000Z'),
+        id: randomUUID(),
+        metadata: null,
+        ticketId: ownTicket.id,
+        type: TicketEventType.CREATED,
+      },
+      {
+        actorId: customer.id,
+        createdAt: new Date('2026-04-21T10:20:00.000Z'),
+        id: randomUUID(),
+        metadata: null,
+        ticketId: ownTicket.id,
+        type: TicketEventType.REPLIED,
+      },
+      {
+        actorId: staffUser.id,
+        createdAt: new Date('2026-04-21T10:40:00.000Z'),
+        id: randomUUID(),
+        metadata: {
+          source: 'internal-note',
+        },
+        ticketId: ownTicket.id,
+        type: TicketEventType.NOTE_ADDED,
+      },
+    );
+    prismaMock.ticketMessageStore.push(
+      {
+        authorId: customer.id,
+        body: 'Public customer reply for timeline.',
+        createdAt: new Date('2026-04-21T10:10:00.000Z'),
+        id: randomUUID(),
+        isInternal: false,
+        ticketId: ownTicket.id,
+        updatedAt: new Date('2026-04-21T10:10:00.000Z'),
+      },
+      {
+        authorId: staffUser.id,
+        body: 'Internal note that customers must never receive.',
+        createdAt: new Date('2026-04-21T10:30:00.000Z'),
+        id: randomUUID(),
+        isInternal: true,
+        ticketId: ownTicket.id,
+        updatedAt: new Date('2026-04-21T10:30:00.000Z'),
+      },
+    );
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    const response = await agent
+      .get(`/tickets/${ownTicket.id}/timeline`)
+      .expect(200);
+
+    expect(response.body.ticketId).toBe(ownTicket.id);
+    expect(
+      response.body.items.map((item: { type: string }) => item.type),
+    ).toEqual(['SYSTEM_EVENT', 'PUBLIC_REPLY', 'SYSTEM_EVENT']);
+    expect(
+      response.body.items.some(
+        (item: { body?: string }) =>
+          item.body === 'Internal note that customers must never receive.',
+      ),
+    ).toBe(false);
+    expect(
+      response.body.items.some(
+        (item: { eventType?: TicketEventType }) =>
+          item.eventType === TicketEventType.NOTE_ADDED,
+      ),
+    ).toBe(false);
+  });
+
+  it('returns a staff-visible timeline with internal notes and NOTE_ADDED events in chronological order', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const teamTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Team queue ticket',
+    )!;
+    const customer = prismaMock.userStore.find(
+      (user) => user.email === 'customer.two@demo.test',
+    )!;
+    const staffUser = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
+    )!;
+
+    prismaMock.ticketEventStore.push(
+      {
+        actorId: customer.id,
+        createdAt: new Date('2026-04-21T09:00:00.000Z'),
+        id: randomUUID(),
+        metadata: null,
+        ticketId: teamTicket.id,
+        type: TicketEventType.CREATED,
+      },
+      {
+        actorId: staffUser.id,
+        createdAt: new Date('2026-04-21T09:30:00.000Z'),
+        id: randomUUID(),
+        metadata: null,
+        ticketId: teamTicket.id,
+        type: TicketEventType.NOTE_ADDED,
+      },
+    );
+    prismaMock.ticketMessageStore.push(
+      {
+        authorId: customer.id,
+        body: 'Customer-visible reply.',
+        createdAt: new Date('2026-04-21T09:10:00.000Z'),
+        id: randomUUID(),
+        isInternal: false,
+        ticketId: teamTicket.id,
+        updatedAt: new Date('2026-04-21T09:10:00.000Z'),
+      },
+      {
+        authorId: staffUser.id,
+        body: 'Staff-only investigation note.',
+        createdAt: new Date('2026-04-21T09:20:00.000Z'),
+        id: randomUUID(),
+        isInternal: true,
+        ticketId: teamTicket.id,
+        updatedAt: new Date('2026-04-21T09:20:00.000Z'),
+      },
+    );
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'agent@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    const response = await agent
+      .get(`/tickets/${teamTicket.id}/timeline`)
+      .expect(200);
+
+    expect(
+      response.body.items.map((item: { type: string }) => item.type),
+    ).toEqual([
+      'SYSTEM_EVENT',
+      'PUBLIC_REPLY',
+      'INTERNAL_NOTE',
+      'SYSTEM_EVENT',
+    ]);
+    expect(response.body.items[2]).toMatchObject({
+      type: 'INTERNAL_NOTE',
+      body: 'Staff-only investigation note.',
+      isInternal: true,
+      author: {
+        email: 'agent@demo.test',
+      },
+    });
+    expect(response.body.items[3]).toMatchObject({
+      type: 'SYSTEM_EVENT',
+      eventType: TicketEventType.NOTE_ADDED,
+      actor: {
+        email: 'agent@demo.test',
+      },
+    });
+    expect(
+      response.body.items.some(
+        (item: { downloadUrl?: string }) => item.downloadUrl !== undefined,
+      ),
+    ).toBe(false);
+  });
+
+  it('returns 403 when a customer requests another customer ticket timeline', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const otherTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Other customer ticket',
+    )!;
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    await agent.get(`/tickets/${otherTicket.id}/timeline`).expect(403);
+  });
+
+  it('returns 403 when staff requests a ticket timeline outside visibility', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const billingTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Billing queue ticket',
+    )!;
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'agent@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    await agent.get(`/tickets/${billingTicket.id}/timeline`).expect(403);
+  });
+
+  it('uploads an attachment for a visible ticket, stores metadata, and writes an ATTACHMENT_ADDED event', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+    const customer = prismaMock.userStore.find(
+      (user) => user.email === 'customer@demo.test',
+    )!;
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    const response = await agent
+      .post(`/tickets/${ownTicket.id}/attachments`)
+      .attach('file', Buffer.from('plain text attachment'), {
+        contentType: 'text/plain',
+        filename: 'error log.txt',
+      })
+      .expect(201);
+
+    expect(response.body).toEqual({
+      id: expect.any(String),
+      ticketId: ownTicket.id,
+      messageId: null,
+      uploadedById: customer.id,
+      filename: 'error log.txt',
+      mimeType: 'text/plain',
+      sizeBytes: Buffer.byteLength('plain text attachment'),
+      createdAt: expect.any(String),
+    });
+    expect(response.body.storedKey).toBeUndefined();
+    expect(storageMock.upload).toHaveBeenCalledWith({
+      buffer: Buffer.from('plain text attachment'),
+      key: expect.stringMatching(
+        new RegExp(`^tickets/${ownTicket.id}/attachments/.+-error-log.txt$`),
+      ),
+      mimeType: 'text/plain',
+    });
+    expect(prismaMock.attachmentStore).toHaveLength(1);
+    expect(prismaMock.attachmentStore[0]).toMatchObject({
+      id: response.body.id,
+      messageId: null,
+      ticketId: ownTicket.id,
+      uploadedById: customer.id,
+    });
+    expect(
+      prismaMock.ticketEventStore.some(
+        (event) =>
+          event.ticketId === ownTicket.id &&
+          event.actorId === customer.id &&
+          event.type === TicketEventType.ATTACHMENT_ADDED &&
+          event.metadata !== null,
+      ),
+    ).toBe(true);
+  });
+
+  it('cleans up storage and hides raw errors when attachment metadata persistence fails', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+
+    prismaMock.attachment.create.mockRejectedValueOnce(
+      new Error('raw prisma database detail should not be exposed'),
+    );
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    const response = await agent
+      .post(`/tickets/${ownTicket.id}/attachments`)
+      .attach('file', Buffer.from('metadata failure attachment'), {
+        contentType: 'text/plain',
+        filename: 'metadata failure.txt',
+      })
+      .expect(500);
+
+    expect(response.body.message).toBe('Attachment metadata failed.');
+    expect(JSON.stringify(response.body)).not.toContain('raw prisma');
+    expect(storageMock.upload).toHaveBeenCalledWith({
+      buffer: Buffer.from('metadata failure attachment'),
+      key: expect.stringMatching(
+        new RegExp(
+          `^tickets/${ownTicket.id}/attachments/.+-metadata-failure.txt$`,
+        ),
+      ),
+      mimeType: 'text/plain',
+    });
+    expect(storageMock.delete).toHaveBeenCalledWith(
+      expect.stringMatching(
+        new RegExp(
+          `^tickets/${ownTicket.id}/attachments/.+-metadata-failure.txt$`,
+        ),
+      ),
+    );
+    expect(prismaMock.attachmentStore).toHaveLength(0);
+    expect(prismaMock.ticketEventStore).not.toContainEqual(
+      expect.objectContaining({
+        type: TicketEventType.ATTACHMENT_ADDED,
+      }),
+    );
+  });
+
+  it('returns 403 and does not upload when a customer attaches to another customer ticket', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const otherTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Other customer ticket',
+    )!;
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    await agent
+      .post(`/tickets/${otherTicket.id}/attachments`)
+      .attach('file', Buffer.from('forbidden'), {
+        contentType: 'text/plain',
+        filename: 'forbidden.txt',
+      })
+      .expect(403);
+
+    expect(storageMock.upload).not.toHaveBeenCalled();
+    expect(prismaMock.attachmentStore).toHaveLength(0);
+  });
+
+  it('validates attachment uploads before storage writes', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    await agent.post(`/tickets/${ownTicket.id}/attachments`).expect(400);
+
+    await agent
+      .post(`/tickets/${ownTicket.id}/attachments`)
+      .attach('file', Buffer.alloc(0), {
+        contentType: 'text/plain',
+        filename: 'empty.txt',
+      })
+      .expect(400);
+
+    await agent
+      .post(`/tickets/${ownTicket.id}/attachments`)
+      .attach('file', Buffer.from('unsafe script'), {
+        contentType: 'application/javascript',
+        filename: 'unsafe.js',
+      })
+      .expect(400);
+
+    const tooLargeResponse = await agent
+      .post(`/tickets/${ownTicket.id}/attachments`)
+      .attach('file', Buffer.alloc(10 * 1024 * 1024 + 1), {
+        contentType: 'text/plain',
+        filename: 'too-large.txt',
+      });
+
+    expect([400, 413]).toContain(tooLargeResponse.status);
+    expect(storageMock.upload).not.toHaveBeenCalled();
+    expect(prismaMock.attachmentStore).toHaveLength(0);
+  });
+
+  it('allows a customer to get a signed download URL for a public-message attachment', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+    const customer = prismaMock.userStore.find(
+      (user) => user.email === 'customer@demo.test',
+    )!;
+    const publicMessageId = randomUUID();
+    const publicAttachmentId = randomUUID();
+
+    prismaMock.ticketMessageStore.push({
+      authorId: customer.id,
+      body: 'Public reply with customer-visible attachment.',
+      createdAt: new Date('2026-04-21T10:55:00.000Z'),
+      id: publicMessageId,
+      isInternal: false,
+      ticketId: ownTicket.id,
+      updatedAt: new Date('2026-04-21T10:55:00.000Z'),
+    });
+    prismaMock.attachmentStore.push({
+      createdAt: new Date('2026-04-21T11:00:00.000Z'),
+      filename: 'visible.txt',
+      id: publicAttachmentId,
+      messageId: publicMessageId,
+      mimeType: 'text/plain',
+      sizeBytes: 12,
+      storedKey: `tickets/${ownTicket.id}/attachments/visible.txt`,
+      ticketId: ownTicket.id,
+      uploadedById: customer.id,
+    });
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    const response = await agent
+      .get(
+        `/tickets/${ownTicket.id}/attachments/${publicAttachmentId}/download-url`,
+      )
+      .expect(200);
+
+    expect(response.body).toEqual({
+      expiresInSeconds: 300,
+      url: 'http://localhost:9000/customer-support/signed-download-url',
+    });
+    expect(storageMock.getSignedUrl).toHaveBeenCalledWith(
+      `tickets/${ownTicket.id}/attachments/visible.txt`,
+    );
+  });
+
+  it('returns 403 when a customer requests an internal-note attachment download URL', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+    const staffUser = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
+    )!;
+    const internalMessageId = randomUUID();
+    const internalAttachmentId = randomUUID();
+
+    prismaMock.ticketMessageStore.push({
+      authorId: staffUser.id,
+      body: 'Staff-only attachment context.',
+      createdAt: new Date('2026-04-21T11:05:00.000Z'),
+      id: internalMessageId,
+      isInternal: true,
+      ticketId: ownTicket.id,
+      updatedAt: new Date('2026-04-21T11:05:00.000Z'),
+    });
+    prismaMock.attachmentStore.push({
+      createdAt: new Date('2026-04-21T11:10:00.000Z'),
+      filename: 'internal.txt',
+      id: internalAttachmentId,
+      messageId: internalMessageId,
+      mimeType: 'text/plain',
+      sizeBytes: 16,
+      storedKey: `tickets/${ownTicket.id}/attachments/internal.txt`,
+      ticketId: ownTicket.id,
+      uploadedById: staffUser.id,
+    });
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    await agent
+      .get(
+        `/tickets/${ownTicket.id}/attachments/${internalAttachmentId}/download-url`,
+      )
+      .expect(403);
+    expect(storageMock.getSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it('allows staff to get a signed download URL for a visible internal-note attachment', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const teamTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Team queue ticket',
+    )!;
+    const staffUser = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
+    )!;
+    const internalMessageId = randomUUID();
+    const internalAttachmentId = randomUUID();
+
+    prismaMock.ticketMessageStore.push({
+      authorId: staffUser.id,
+      body: 'Staff-only diagnostics.',
+      createdAt: new Date('2026-04-21T11:15:00.000Z'),
+      id: internalMessageId,
+      isInternal: true,
+      ticketId: teamTicket.id,
+      updatedAt: new Date('2026-04-21T11:15:00.000Z'),
+    });
+    prismaMock.attachmentStore.push({
+      createdAt: new Date('2026-04-21T11:20:00.000Z'),
+      filename: 'staff-diagnostics.txt',
+      id: internalAttachmentId,
+      messageId: internalMessageId,
+      mimeType: 'text/plain',
+      sizeBytes: 20,
+      storedKey: `tickets/${teamTicket.id}/attachments/staff-diagnostics.txt`,
+      ticketId: teamTicket.id,
+      uploadedById: staffUser.id,
+    });
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'agent@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    const response = await agent
+      .get(
+        `/tickets/${teamTicket.id}/attachments/${internalAttachmentId}/download-url`,
+      )
+      .expect(200);
+
+    expect(response.body).toEqual({
+      expiresInSeconds: 300,
+      url: 'http://localhost:9000/customer-support/signed-download-url',
+    });
+    expect(storageMock.getSignedUrl).toHaveBeenCalledWith(
+      `tickets/${teamTicket.id}/attachments/staff-diagnostics.txt`,
+    );
+  });
+
+  it('returns 403 when a customer requests an unattached staff upload download URL', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+    const staffUser = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
+    )!;
+    const unattachedAttachmentId = randomUUID();
+
+    prismaMock.attachmentStore.push({
+      createdAt: new Date('2026-04-21T11:25:00.000Z'),
+      filename: 'staff-upload.txt',
+      id: unattachedAttachmentId,
+      messageId: null,
+      mimeType: 'text/plain',
+      sizeBytes: 18,
+      storedKey: `tickets/${ownTicket.id}/attachments/staff-upload.txt`,
+      ticketId: ownTicket.id,
+      uploadedById: staffUser.id,
+    });
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    await agent
+      .get(
+        `/tickets/${ownTicket.id}/attachments/${unattachedAttachmentId}/download-url`,
+      )
+      .expect(403);
+    expect(storageMock.getSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it('denies a download URL when the attachment belongs to another ticket', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+    const otherTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Other customer ticket',
+    )!;
+    const otherCustomer = prismaMock.userStore.find(
+      (user) => user.email === 'customer.two@demo.test',
+    )!;
+    const otherMessageId = randomUUID();
+    const otherAttachmentId = randomUUID();
+
+    prismaMock.ticketMessageStore.push({
+      authorId: otherCustomer.id,
+      body: 'Other customer public reply.',
+      createdAt: new Date('2026-04-21T11:30:00.000Z'),
+      id: otherMessageId,
+      isInternal: false,
+      ticketId: otherTicket.id,
+      updatedAt: new Date('2026-04-21T11:30:00.000Z'),
+    });
+    prismaMock.attachmentStore.push({
+      createdAt: new Date('2026-04-21T11:35:00.000Z'),
+      filename: 'other.txt',
+      id: otherAttachmentId,
+      messageId: otherMessageId,
+      mimeType: 'text/plain',
+      sizeBytes: 10,
+      storedKey: `tickets/${otherTicket.id}/attachments/other.txt`,
+      ticketId: otherTicket.id,
+      uploadedById: otherCustomer.id,
+    });
+
+    await agent
+      .post('/auth/login')
+      .send({
+        email: 'customer@demo.test',
+        password: 'Password1!',
+      })
+      .expect(200);
+
+    await agent
+      .get(
+        `/tickets/${ownTicket.id}/attachments/${otherAttachmentId}/download-url`,
+      )
+      .expect(404);
+
+    await agent
+      .get(
+        `/tickets/${otherTicket.id}/attachments/${otherAttachmentId}/download-url`,
+      )
+      .expect(403);
+    expect(storageMock.getSignedUrl).not.toHaveBeenCalled();
   });
 });

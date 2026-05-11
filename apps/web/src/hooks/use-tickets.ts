@@ -9,13 +9,22 @@ import {
 
 import {
   createTicket,
+  createTicketInternalNote,
+  createTicketPublicReply,
+  getTicketAttachmentDownloadUrl,
   getTicketCategories,
   getTicketById,
+  getTicketTimeline,
   getTickets,
+  uploadTicketAttachment,
+  type CreateTicketMessageInput,
   type CreateTicketInput,
+  type TicketAttachmentDownloadUrlResponse,
   type TicketCategoryOption,
   type TicketDetailResponse,
   type TicketListQuery,
+  type TicketTimelineAttachment,
+  type TicketTimelineResponse,
 } from '@/lib/tickets';
 
 export const useTickets = (query: TicketListQuery) =>
@@ -30,6 +39,13 @@ export const useTicket = (ticketId: string) =>
     enabled: ticketId.length > 0,
     queryKey: ['tickets', 'detail', ticketId],
     queryFn: () => getTicketById(ticketId),
+  });
+
+export const useTicketTimeline = (ticketId: string) =>
+  useQuery<TicketTimelineResponse>({
+    enabled: ticketId.length > 0,
+    queryKey: ['tickets', 'timeline', ticketId],
+    queryFn: () => getTicketTimeline(ticketId),
   });
 
 export const useTicketCategories = (enabled = true) =>
@@ -51,3 +67,42 @@ export const useCreateTicket = () => {
     },
   });
 };
+
+export const useCreateTicketPublicReply = (ticketId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: CreateTicketMessageInput) =>
+      createTicketPublicReply(ticketId, input),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ['tickets', 'timeline', ticketId],
+      });
+    },
+  });
+};
+
+export const useCreateTicketInternalNote = (ticketId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: CreateTicketMessageInput) =>
+      createTicketInternalNote(ticketId, input),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ['tickets', 'timeline', ticketId],
+      });
+    },
+  });
+};
+
+export const useUploadTicketAttachment = (ticketId: string) =>
+  useMutation<TicketTimelineAttachment, Error, File>({
+    mutationFn: (file) => uploadTicketAttachment(ticketId, file),
+  });
+
+export const useTicketAttachmentDownloadUrl = (ticketId: string) =>
+  useMutation<TicketAttachmentDownloadUrlResponse, Error, string>({
+    mutationFn: (attachmentId) =>
+      getTicketAttachmentDownloadUrl(ticketId, attachmentId),
+  });

@@ -5,7 +5,7 @@ const ProfilePage = () => {
     <PageScaffold
       eyebrow="APP SHELL"
       title="Profile Placeholder"
-      description="The profile route is available to all authenticated roles in Milestone 1, but profile editing remains intentionally deferred."
+      description="The profile route is available to all authenticated roles, but profile editing remains intentionally deferred."
     />
   );
 };

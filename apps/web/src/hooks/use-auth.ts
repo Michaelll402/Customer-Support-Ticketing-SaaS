@@ -3,18 +3,44 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
+  authUserSchema,
   authQueryKey,
   getCurrentUser,
   login,
   logout,
   register,
 } from '@/lib/auth';
+import { ApiClientError } from '@/lib/api';
+
+import type { QueryClient } from '@tanstack/react-query';
+
+const isRoleSensitiveQueryKey = (queryKey: readonly unknown[]) =>
+  queryKey[0] === 'tickets';
+
+const clearRoleSensitiveQueries = async (queryClient: QueryClient) => {
+  await queryClient.cancelQueries({
+    predicate: (query) => isRoleSensitiveQueryKey(query.queryKey),
+  });
+
+  queryClient.removeQueries({
+    predicate: (query) => isRoleSensitiveQueryKey(query.queryKey),
+  });
+};
 
 export const useCurrentUser = () =>
   useQuery({
     queryKey: authQueryKey,
-    queryFn: getCurrentUser,
-    retry: false,
+    queryFn: ({ signal }) => getCurrentUser(signal),
+    retry: (failureCount, error) => {
+      if (
+        error instanceof ApiClientError &&
+        (error.statusCode === 401 || error.statusCode === 403)
+      ) {
+        return false;
+      }
+
+      return failureCount < 2;
+    },
     staleTime: 60_000,
   });
 
@@ -23,8 +49,14 @@ export const useLogin = () => {
 
   return useMutation({
     mutationFn: login,
-    onSuccess: (session) => {
-      queryClient.setQueryData(authQueryKey, session.user);
+    onSuccess: async (session) => {
+      await queryClient.cancelQueries({ queryKey: authQueryKey });
+      await clearRoleSensitiveQueries(queryClient);
+
+      queryClient.setQueryData(
+        authQueryKey,
+        authUserSchema.parse(session.user),
+      );
     },
   });
 };
@@ -34,8 +66,14 @@ export const useRegister = () => {
 
   return useMutation({
     mutationFn: register,
-    onSuccess: (session) => {
-      queryClient.setQueryData(authQueryKey, session.user);
+    onSuccess: async (session) => {
+      await queryClient.cancelQueries({ queryKey: authQueryKey });
+      await clearRoleSensitiveQueries(queryClient);
+
+      queryClient.setQueryData(
+        authQueryKey,
+        authUserSchema.parse(session.user),
+      );
     },
   });
 };
@@ -45,8 +83,15 @@ export const useLogout = () => {
 
   return useMutation({
     mutationFn: logout,
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: authQueryKey });
+      await clearRoleSensitiveQueries(queryClient);
+    },
     onSuccess: () => {
       queryClient.setQueryData(authQueryKey, null);
+      queryClient.removeQueries({
+        predicate: (query) => isRoleSensitiveQueryKey(query.queryKey),
+      });
     },
   });
 };

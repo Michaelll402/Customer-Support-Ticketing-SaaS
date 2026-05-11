@@ -40,10 +40,11 @@ export const signUpSchema = z.object({
 
 export type SignUpInput = z.infer<typeof signUpSchema>;
 
-export const getCurrentUser = async () => {
+export const getCurrentUser = async (signal?: AbortSignal) => {
   try {
     const response = await apiRequest<AuthUser>('/auth/me', {
       cache: 'no-store',
+      signal,
     });
     return authUserSchema.parse(response);
   } catch (error) {

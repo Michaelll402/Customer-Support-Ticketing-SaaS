@@ -29,7 +29,7 @@ export class UpdateTicketDto {
   @ApiPropertyOptional({
     enum: TicketStatus,
     description:
-      'In Milestone 2, customers may only close their own ticket or reopen a closed one.',
+      'Customers may only close their own ticket or reopen a closed one.',
     example: TicketStatus.CLOSED,
   })
   @IsOptional()
