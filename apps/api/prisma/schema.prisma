@@ -34,6 +34,7 @@ enum TicketEventType {
   PRIORITY_CHANGED
   ASSIGNED
   REASSIGNED
+  TEAM_TRANSFERRED
   TAGGED
   CATEGORIZED
   CLOSED_BY_CUSTOMER
@@ -41,6 +42,15 @@ enum TicketEventType {
   REPLIED
   NOTE_ADDED
   ATTACHMENT_ADDED
+}
+
+enum NotificationType {
+  TICKET_ASSIGNED
+  TICKET_REPLIED
+  STATUS_CHANGED
+  NOTE_ADDED
+  SLA_AT_RISK
+  SLA_BREACHED
 }
 
 model Role {
@@ -65,6 +75,7 @@ model User {
   ticketEvents        TicketEvent[]   @relation("TicketEventActor")
   ticketMessages      TicketMessage[] @relation("TicketMessageAuthor")
   uploadedAttachments Attachment[]    @relation("AttachmentUploader")
+  notifications       Notification[]
 }
 
 model Team {
@@ -128,6 +139,7 @@ model Ticket {
   events             TicketEvent[]
   messages           TicketMessage[]
   attachments        Attachment[]
+  notifications      Notification[]
 
   @@index([requesterId])
   @@index([assigneeId])
@@ -198,4 +210,20 @@ model Attachment {
   @@index([ticketId, createdAt])
   @@index([messageId])
   @@index([uploadedById])
+}
+
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @db.Uuid
+  ticketId  String?          @db.Uuid
+  type      NotificationType
+  message   String           @db.Text
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticket    Ticket?          @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+  @@index([userId, isRead, createdAt])
+  @@index([userId, createdAt])
+  @@index([ticketId])
 }
