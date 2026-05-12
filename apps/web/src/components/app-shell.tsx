@@ -16,6 +16,8 @@ import {
   siteTitle,
 } from '@/lib/site';
 
+import { NotificationBell } from './notifications/notification-bell';
+
 interface AppShellProps {
   children: ReactNode;
 }
@@ -189,17 +191,20 @@ export const AppShell = ({ children }: AppShellProps) => {
                 </p>
               </div>
 
-              <button
-                className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={logoutMutation.isPending}
-                onClick={async () => {
-                  await logoutMutation.mutateAsync();
-                  router.replace('/sign-in');
-                }}
-                type="button"
-              >
-                {logoutMutation.isPending ? 'Signing out…' : 'Sign out'}
-              </button>
+              <div className="flex flex-wrap items-center gap-3">
+                <NotificationBell />
+                <button
+                  className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={logoutMutation.isPending}
+                  onClick={async () => {
+                    await logoutMutation.mutateAsync();
+                    router.replace('/sign-in');
+                  }}
+                  type="button"
+                >
+                  {logoutMutation.isPending ? 'Signing out…' : 'Sign out'}
+                </button>
+              </div>
             </div>
 
             {logoutMutation.isError ? (

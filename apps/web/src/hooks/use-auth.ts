@@ -15,7 +15,7 @@ import { ApiClientError } from '@/lib/api';
 import type { QueryClient } from '@tanstack/react-query';
 
 const isRoleSensitiveQueryKey = (queryKey: readonly unknown[]) =>
-  queryKey[0] === 'tickets';
+  queryKey[0] === 'tickets' || queryKey[0] === 'notifications';
 
 const clearRoleSensitiveQueries = async (queryClient: QueryClient) => {
   await queryClient.cancelQueries({
