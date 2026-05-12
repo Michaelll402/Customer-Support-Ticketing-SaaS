@@ -12,6 +12,7 @@ import {
   Prisma,
   RoleName,
   TicketEventType,
+  type TicketPriority,
   TicketStatus,
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
@@ -19,11 +20,14 @@ import { randomUUID } from 'node:crypto';
 import type { AccessTokenPayload } from '../auth/auth.types';
 import { StorageService } from '../storage/storage.service';
 import { PrismaService } from '../../common/database/prisma.service';
+import type { AssignTicketDto } from './dto/assign-ticket.dto';
+import { AssignableUserDto } from './dto/assignable-user.dto';
 import type { AttachmentDownloadUrlDto } from './dto/ticket-attachment.dto';
 import { TicketAttachmentDto } from './dto/ticket-attachment.dto';
 import { TicketDetailDto } from './dto/ticket-detail.dto';
 import { TicketCategoryOptionDto } from './dto/ticket-category-option.dto';
 import { TicketMessageDto } from './dto/ticket-message.dto';
+import { TicketTagOptionDto } from './dto/ticket-tag-option.dto';
 import type { CreateTicketDto } from './dto/create-ticket.dto';
 import type { CreateTicketMessageDto } from './dto/create-ticket-message.dto';
 import { SortOrder, TicketListSortBy } from './dto/ticket-list-query.dto';
@@ -31,7 +35,12 @@ import { TicketListItemDto } from './dto/ticket-list-item.dto';
 import type { TicketListQueryDto } from './dto/ticket-list-query.dto';
 import type { TicketListResponseDto } from './dto/ticket-list-response.dto';
 import { TicketTimelineDto } from './dto/ticket-timeline.dto';
+import type { TransferTicketTeamDto } from './dto/transfer-ticket-team.dto';
+import type { UpdateTicketCategoryDto } from './dto/update-ticket-category.dto';
 import type { UpdateTicketDto } from './dto/update-ticket.dto';
+import type { UpdateTicketPriorityDto } from './dto/update-ticket-priority.dto';
+import type { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
+import type { UpdateTicketTagsDto } from './dto/update-ticket-tags.dto';
 
 const ticketDetailInclude = Prisma.validator<Prisma.TicketInclude>()({
   assignee: {
@@ -134,12 +143,45 @@ type VisibleTicketForMutation = {
   status: TicketStatus;
 };
 
+type VisibleTicketForWorkflow = {
+  id: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  assigneeId: string | null;
+  teamId: string | null;
+  categoryId: string | null;
+};
+
 export const TICKET_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 
 const DEFAULT_TICKET_TEAM_NAME = 'Technical Support';
 
 const CATEGORY_NAME_TO_TEAM_NAME: Record<string, string> = {
   Billing: 'Billing',
+};
+
+const STAFF_ROLES: ReadonlySet<RoleName> = new Set<RoleName>([
+  RoleName.AGENT,
+  RoleName.MANAGER,
+  RoleName.ADMIN,
+]);
+
+const ALLOWED_STAFF_STATUS_TRANSITIONS: Record<
+  TicketStatus,
+  ReadonlyArray<TicketStatus>
+> = {
+  [TicketStatus.OPEN]: [
+    TicketStatus.PENDING,
+    TicketStatus.RESOLVED,
+    TicketStatus.CLOSED,
+  ],
+  [TicketStatus.PENDING]: [
+    TicketStatus.OPEN,
+    TicketStatus.RESOLVED,
+    TicketStatus.CLOSED,
+  ],
+  [TicketStatus.RESOLVED]: [TicketStatus.OPEN, TicketStatus.CLOSED],
+  [TicketStatus.CLOSED]: [TicketStatus.OPEN],
 };
 
 const TICKET_ATTACHMENT_ALLOWED_MIME_TYPES = new Set([
@@ -648,6 +690,539 @@ export class TicketsService {
     }
 
     throw new ForbiddenException('You do not have access to this ticket.');
+  }
+
+  async assignTicket(
+    ticketId: string,
+    viewer: TicketVisibilityViewer,
+    input: AssignTicketDto,
+  ): Promise<TicketDetailDto> {
+    this.requireStaff(viewer);
+
+    const visibleTicket = await this.findVisibleTicketForWorkflow(
+      ticketId,
+      viewer,
+    );
+
+    if (input.assigneeId === visibleTicket.assigneeId) {
+      return this.loadTicketDetail(ticketId);
+    }
+
+    if (input.assigneeId !== null) {
+      const assigneeUser = await this.prisma.user.findUnique({
+        where: {
+          id: input.assigneeId,
+        },
+        include: {
+          role: true,
+        },
+      });
+
+      if (!assigneeUser || !STAFF_ROLES.has(assigneeUser.role.name)) {
+        throw new BadRequestException(
+          'Assignee must be an agent, manager, or admin.',
+        );
+      }
+
+      if (viewer.role !== RoleName.ADMIN) {
+        if (visibleTicket.teamId === null) {
+          throw new ForbiddenException(
+            'Only admins can assign tickets without a team.',
+          );
+        }
+
+        const membership = await this.prisma.teamMember.findFirst({
+          where: {
+            userId: input.assigneeId,
+            teamId: visibleTicket.teamId,
+          },
+        });
+
+        if (!membership) {
+          throw new BadRequestException(
+            'Assignee must belong to the ticket team.',
+          );
+        }
+      }
+    }
+
+    const eventType =
+      visibleTicket.assigneeId === null && input.assigneeId !== null
+        ? TicketEventType.ASSIGNED
+        : TicketEventType.REASSIGNED;
+
+    const updated = await this.prisma.ticket.update({
+      where: {
+        id: visibleTicket.id,
+      },
+      data: {
+        assigneeId: input.assigneeId,
+        events: {
+          create: {
+            actorId: viewer.sub,
+            metadata: {
+              fromAssigneeId: visibleTicket.assigneeId,
+              toAssigneeId: input.assigneeId,
+            },
+            type: eventType,
+          },
+        },
+      },
+      include: ticketDetailInclude,
+    });
+
+    return TicketDetailDto.fromRecord(updated);
+  }
+
+  async updateTicketStatus(
+    ticketId: string,
+    viewer: TicketVisibilityViewer,
+    input: UpdateTicketStatusDto,
+  ): Promise<TicketDetailDto> {
+    this.requireStaff(viewer);
+
+    const visibleTicket = await this.findVisibleTicketForWorkflow(
+      ticketId,
+      viewer,
+    );
+    const fromStatus = visibleTicket.status;
+
+    if (input.status === fromStatus) {
+      return this.loadTicketDetail(ticketId);
+    }
+
+    const allowed = ALLOWED_STAFF_STATUS_TRANSITIONS[fromStatus];
+
+    if (!allowed.includes(input.status)) {
+      throw new BadRequestException(
+        `Status transition from ${fromStatus} to ${input.status} is not allowed.`,
+      );
+    }
+
+    const updated = await this.prisma.ticket.update({
+      where: {
+        id: visibleTicket.id,
+      },
+      data: {
+        status: input.status,
+        events: {
+          create: {
+            actorId: viewer.sub,
+            metadata: {
+              fromStatus,
+              toStatus: input.status,
+            },
+            type: TicketEventType.STATUS_CHANGED,
+          },
+        },
+      },
+      include: ticketDetailInclude,
+    });
+
+    return TicketDetailDto.fromRecord(updated);
+  }
+
+  async updateTicketPriority(
+    ticketId: string,
+    viewer: TicketVisibilityViewer,
+    input: UpdateTicketPriorityDto,
+  ): Promise<TicketDetailDto> {
+    this.requireStaff(viewer);
+
+    const visibleTicket = await this.findVisibleTicketForWorkflow(
+      ticketId,
+      viewer,
+    );
+
+    if (input.priority === visibleTicket.priority) {
+      return this.loadTicketDetail(ticketId);
+    }
+
+    const updated = await this.prisma.ticket.update({
+      where: {
+        id: visibleTicket.id,
+      },
+      data: {
+        priority: input.priority,
+        events: {
+          create: {
+            actorId: viewer.sub,
+            metadata: {
+              fromPriority: visibleTicket.priority,
+              toPriority: input.priority,
+            },
+            type: TicketEventType.PRIORITY_CHANGED,
+          },
+        },
+      },
+      include: ticketDetailInclude,
+    });
+
+    return TicketDetailDto.fromRecord(updated);
+  }
+
+  async updateTicketTags(
+    ticketId: string,
+    viewer: TicketVisibilityViewer,
+    input: UpdateTicketTagsDto,
+  ): Promise<TicketDetailDto> {
+    this.requireStaff(viewer);
+
+    const visibleTicket = await this.findVisibleTicketForWorkflow(
+      ticketId,
+      viewer,
+    );
+    const uniqueTagIds = [...new Set(input.tagIds)];
+
+    if (uniqueTagIds.length > 0) {
+      const existingTags = await this.prisma.tag.findMany({
+        where: {
+          id: {
+            in: uniqueTagIds,
+          },
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (existingTags.length !== uniqueTagIds.length) {
+        throw new BadRequestException('One or more tag IDs do not exist.');
+      }
+    }
+
+    const currentLinks = await this.prisma.ticketTag.findMany({
+      where: {
+        ticketId: visibleTicket.id,
+      },
+      select: {
+        tagId: true,
+      },
+    });
+    const currentTagIds = new Set(currentLinks.map((link) => link.tagId));
+    const requestedTagIds = new Set(uniqueTagIds);
+    const added = uniqueTagIds.filter((id) => !currentTagIds.has(id));
+    const removed = [...currentTagIds].filter((id) => !requestedTagIds.has(id));
+
+    if (added.length === 0 && removed.length === 0) {
+      return this.loadTicketDetail(ticketId);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      if (removed.length > 0) {
+        await tx.ticketTag.deleteMany({
+          where: {
+            ticketId: visibleTicket.id,
+            tagId: {
+              in: removed,
+            },
+          },
+        });
+      }
+
+      if (added.length > 0) {
+        await tx.ticketTag.createMany({
+          data: added.map((tagId) => ({
+            ticketId: visibleTicket.id,
+            tagId,
+          })),
+        });
+      }
+
+      await tx.ticket.update({
+        where: {
+          id: visibleTicket.id,
+        },
+        data: {
+          events: {
+            create: {
+              actorId: viewer.sub,
+              metadata: {
+                added,
+                removed,
+              },
+              type: TicketEventType.TAGGED,
+            },
+          },
+        },
+      });
+    });
+
+    return this.loadTicketDetail(ticketId);
+  }
+
+  async updateTicketCategory(
+    ticketId: string,
+    viewer: TicketVisibilityViewer,
+    input: UpdateTicketCategoryDto,
+  ): Promise<TicketDetailDto> {
+    this.requireStaff(viewer);
+
+    const visibleTicket = await this.findVisibleTicketForWorkflow(
+      ticketId,
+      viewer,
+    );
+
+    if (input.categoryId === visibleTicket.categoryId) {
+      return this.loadTicketDetail(ticketId);
+    }
+
+    if (input.categoryId !== null) {
+      const category = await this.prisma.category.findUnique({
+        where: {
+          id: input.categoryId,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (!category) {
+        throw new NotFoundException('Category not found.');
+      }
+    }
+
+    const updated = await this.prisma.ticket.update({
+      where: {
+        id: visibleTicket.id,
+      },
+      data: {
+        categoryId: input.categoryId,
+        events: {
+          create: {
+            actorId: viewer.sub,
+            metadata: {
+              fromCategoryId: visibleTicket.categoryId,
+              toCategoryId: input.categoryId,
+            },
+            type: TicketEventType.CATEGORIZED,
+          },
+        },
+      },
+      include: ticketDetailInclude,
+    });
+
+    return TicketDetailDto.fromRecord(updated);
+  }
+
+  async transferTicketTeam(
+    ticketId: string,
+    viewer: TicketVisibilityViewer,
+    input: TransferTicketTeamDto,
+  ): Promise<TicketDetailDto> {
+    if (viewer.role !== RoleName.MANAGER && viewer.role !== RoleName.ADMIN) {
+      throw new ForbiddenException(
+        'Only managers and admins can transfer tickets between teams.',
+      );
+    }
+
+    const visibleTicket = await this.findVisibleTicketForWorkflow(
+      ticketId,
+      viewer,
+    );
+
+    if (visibleTicket.teamId === input.teamId) {
+      return this.loadTicketDetail(ticketId);
+    }
+
+    const destinationTeam = await this.prisma.team.findUnique({
+      where: {
+        id: input.teamId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!destinationTeam) {
+      throw new NotFoundException('Destination team not found.');
+    }
+
+    if (viewer.role === RoleName.MANAGER) {
+      const managerAccess = await this.prisma.teamMember.findFirst({
+        where: {
+          userId: viewer.sub,
+          teamId: input.teamId,
+        },
+      });
+
+      if (!managerAccess) {
+        throw new ForbiddenException(
+          'Managers can only transfer tickets to teams they belong to.',
+        );
+      }
+    }
+
+    let mustClearAssignee = false;
+    if (visibleTicket.assigneeId !== null) {
+      const assigneeMembership = await this.prisma.teamMember.findFirst({
+        where: {
+          userId: visibleTicket.assigneeId,
+          teamId: input.teamId,
+        },
+      });
+
+      if (!assigneeMembership) {
+        mustClearAssignee = true;
+      }
+    }
+
+    const fromTeamId = visibleTicket.teamId;
+    const fromAssigneeId = visibleTicket.assigneeId;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.ticket.update({
+        where: {
+          id: visibleTicket.id,
+        },
+        data: {
+          teamId: input.teamId,
+          ...(mustClearAssignee ? { assigneeId: null } : {}),
+        },
+      });
+
+      await tx.ticketEvent.create({
+        data: {
+          actorId: viewer.sub,
+          ticketId: visibleTicket.id,
+          metadata: {
+            fromTeamId,
+            toTeamId: input.teamId,
+          },
+          type: TicketEventType.TEAM_TRANSFERRED,
+        },
+      });
+
+      if (mustClearAssignee) {
+        await tx.ticketEvent.create({
+          data: {
+            actorId: viewer.sub,
+            ticketId: visibleTicket.id,
+            metadata: {
+              fromAssigneeId,
+              toAssigneeId: null,
+            },
+            type: TicketEventType.REASSIGNED,
+          },
+        });
+      }
+    });
+
+    return this.loadTicketDetail(ticketId);
+  }
+
+  async listTicketTags(): Promise<TicketTagOptionDto[]> {
+    const tags = await this.prisma.tag.findMany({
+      orderBy: {
+        name: 'asc',
+      },
+    });
+
+    return tags.map((tag) => TicketTagOptionDto.fromTag(tag));
+  }
+
+  async listAssignableUsers(
+    ticketId: string,
+    viewer: TicketVisibilityViewer,
+  ): Promise<AssignableUserDto[]> {
+    this.requireStaff(viewer);
+
+    const visibleTicket = await this.findVisibleTicketForWorkflow(
+      ticketId,
+      viewer,
+    );
+
+    const where: Prisma.UserWhereInput = {
+      role: {
+        name: {
+          in: [RoleName.AGENT, RoleName.MANAGER, RoleName.ADMIN],
+        },
+      },
+    };
+
+    if (viewer.role !== RoleName.ADMIN) {
+      if (visibleTicket.teamId === null) {
+        return [];
+      }
+
+      where.teamMemberships = {
+        some: {
+          teamId: visibleTicket.teamId,
+        },
+      };
+    }
+
+    const users = await this.prisma.user.findMany({
+      where,
+      include: {
+        role: true,
+      },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+    });
+
+    return users.map((user) => AssignableUserDto.fromRecord(user));
+  }
+
+  private requireStaff(viewer: TicketVisibilityViewer): void {
+    if (!STAFF_ROLES.has(viewer.role)) {
+      throw new ForbiddenException(
+        'Only staff users can perform this workflow action.',
+      );
+    }
+  }
+
+  private async findVisibleTicketForWorkflow(
+    ticketId: string,
+    viewer: TicketVisibilityViewer,
+  ): Promise<VisibleTicketForWorkflow> {
+    const visibleTicket = await this.prisma.ticket.findFirst({
+      where: {
+        id: ticketId,
+        ...this.buildVisibilityWhere(viewer),
+      },
+      select: {
+        id: true,
+        status: true,
+        priority: true,
+        assigneeId: true,
+        teamId: true,
+        categoryId: true,
+      },
+    });
+
+    if (visibleTicket) {
+      return visibleTicket;
+    }
+
+    const ticketExists = await this.prisma.ticket.findUnique({
+      where: {
+        id: ticketId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!ticketExists) {
+      throw new NotFoundException('Ticket not found.');
+    }
+
+    throw new ForbiddenException('You do not have access to this ticket.');
+  }
+
+  private async loadTicketDetail(ticketId: string): Promise<TicketDetailDto> {
+    const ticket = await this.prisma.ticket.findFirst({
+      where: {
+        id: ticketId,
+      },
+      include: ticketDetailInclude,
+    });
+
+    if (!ticket) {
+      throw new NotFoundException('Ticket not found.');
+    }
+
+    return TicketDetailDto.fromRecord(ticket);
   }
 
   private async findVisibleTicketForMutation(

@@ -163,8 +163,74 @@ type UpdateArgs = {
     };
     status?: TicketStatus;
     subject?: string;
+    priority?: TicketPriority;
+    assigneeId?: string | null;
+    teamId?: string | null;
+    categoryId?: string | null;
   };
 } & TicketIncludeArgs;
+
+type TagFindManyArgs = {
+  orderBy?: {
+    name?: 'asc' | 'desc';
+  };
+  where?: {
+    id?: {
+      in?: string[];
+    };
+  };
+};
+
+type TicketTagFindManyArgs = {
+  where?: {
+    ticketId?: string;
+  };
+};
+
+type TicketTagCreateManyArgs = {
+  data: Array<{
+    ticketId: string;
+    tagId: string;
+  }>;
+};
+
+type TicketTagDeleteManyArgs = {
+  where?: {
+    ticketId?: string;
+    tagId?: {
+      in?: string[];
+    };
+  };
+};
+
+type TeamMemberFindFirstArgs = {
+  where?: {
+    userId?: string;
+    teamId?: string;
+  };
+};
+
+type UserFindManyArgs = {
+  where?: {
+    role?: {
+      name?: {
+        in?: RoleName[];
+      };
+    };
+    teamMemberships?: {
+      some?: {
+        teamId?: string;
+      };
+    };
+  };
+  include?: {
+    role?: boolean;
+  };
+  orderBy?: Array<{
+    firstName?: 'asc' | 'desc';
+    lastName?: 'asc' | 'desc';
+  }>;
+};
 
 type TicketMessageCreateArgs = {
   data: {
@@ -521,6 +587,117 @@ const createPrismaMock = () => {
         return null;
       },
     ),
+    findMany: vi.fn(async ({ where, orderBy }: UserFindManyArgs = {}) => {
+      const results = users.filter((user) => {
+        if (
+          where?.role?.name?.in &&
+          !where.role.name.in.includes(user.role.name)
+        ) {
+          return false;
+        }
+
+        if (where?.teamMemberships?.some?.teamId) {
+          const targetTeamId = where.teamMemberships.some.teamId;
+          const matches = teamMembers.some(
+            (member) =>
+              member.userId === user.id && member.teamId === targetTeamId,
+          );
+          if (!matches) return false;
+        }
+
+        return true;
+      });
+
+      if (orderBy && orderBy.length > 0) {
+        results.sort((left, right) => {
+          for (const clause of orderBy) {
+            if (clause.firstName) {
+              const comparison = left.firstName.localeCompare(right.firstName);
+              if (comparison !== 0) {
+                return clause.firstName === 'asc' ? comparison : -comparison;
+              }
+            }
+            if (clause.lastName) {
+              const comparison = left.lastName.localeCompare(right.lastName);
+              if (comparison !== 0) {
+                return clause.lastName === 'asc' ? comparison : -comparison;
+              }
+            }
+          }
+          return 0;
+        });
+      }
+
+      return results;
+    }),
+  };
+
+  const tagModel = {
+    findMany: vi.fn(async ({ orderBy, where }: TagFindManyArgs = {}) => {
+      const results = tags.filter((tag) => {
+        if (where?.id?.in && !where.id.in.includes(tag.id)) {
+          return false;
+        }
+        return true;
+      });
+
+      if (orderBy?.name) {
+        results.sort((left, right) =>
+          orderBy.name === 'asc'
+            ? left.name.localeCompare(right.name)
+            : right.name.localeCompare(left.name),
+        );
+      }
+
+      return results;
+    }),
+  };
+
+  const ticketTagModel = {
+    findMany: vi.fn(async ({ where }: TicketTagFindManyArgs = {}) =>
+      ticketTags.filter((link) => {
+        if (where?.ticketId && link.ticketId !== where.ticketId) {
+          return false;
+        }
+        return true;
+      }),
+    ),
+    createMany: vi.fn(async ({ data }: TicketTagCreateManyArgs) => {
+      for (const entry of data) {
+        ticketTags.push({
+          tagId: entry.tagId,
+          ticketId: entry.ticketId,
+        });
+      }
+      return { count: data.length };
+    }),
+    deleteMany: vi.fn(async ({ where }: TicketTagDeleteManyArgs = {}) => {
+      let count = 0;
+      for (let index = ticketTags.length - 1; index >= 0; index -= 1) {
+        const link = ticketTags[index]!;
+        if (where?.ticketId && link.ticketId !== where.ticketId) {
+          continue;
+        }
+        if (where?.tagId?.in && !where.tagId.in.includes(link.tagId)) {
+          continue;
+        }
+        ticketTags.splice(index, 1);
+        count += 1;
+      }
+      return { count };
+    }),
+  };
+
+  const teamMemberModel = {
+    findFirst: vi.fn(async ({ where }: TeamMemberFindFirstArgs = {}) => {
+      return (
+        teamMembers.find((member) => {
+          if (where?.userId && member.userId !== where.userId) return false;
+          if (where?.teamId && member.teamId !== where.teamId) return false;
+          return true;
+        }) ?? null
+      );
+    }),
   };
 
   const categoryModel = {
@@ -685,6 +862,22 @@ const createPrismaMock = () => {
 
       if (data.status !== undefined) {
         ticket.status = data.status;
+      }
+
+      if (data.priority !== undefined) {
+        ticket.priority = data.priority;
+      }
+
+      if (data.assigneeId !== undefined) {
+        ticket.assigneeId = data.assigneeId;
+      }
+
+      if (data.teamId !== undefined) {
+        ticket.teamId = data.teamId;
+      }
+
+      if (data.categoryId !== undefined) {
+        ticket.categoryId = data.categoryId;
       }
 
       ticket.updatedAt = now;
@@ -1007,14 +1200,28 @@ const createPrismaMock = () => {
       async <T>(
         callback: (client: {
           attachment: typeof attachmentModel;
+          category: typeof categoryModel;
+          tag: typeof tagModel;
+          team: typeof teamModel;
+          teamMember: typeof teamMemberModel;
+          ticket: typeof ticketModel;
           ticketEvent: typeof ticketEventModel;
           ticketMessage: typeof ticketMessageModel;
+          ticketTag: typeof ticketTagModel;
+          user: typeof userModel;
         }) => Promise<T>,
       ) =>
         callback({
           attachment: attachmentModel,
+          category: categoryModel,
+          tag: tagModel,
+          team: teamModel,
+          teamMember: teamMemberModel,
+          ticket: ticketModel,
           ticketEvent: ticketEventModel,
           ticketMessage: ticketMessageModel,
+          ticketTag: ticketTagModel,
+          user: userModel,
         }),
     ),
     attachmentStore: attachments,
@@ -1030,10 +1237,13 @@ const createPrismaMock = () => {
     ticketTagStore: ticketTags,
     userStore: users,
     category: categoryModel,
+    tag: tagModel,
     team: teamModel,
+    teamMember: teamMemberModel,
     ticket: ticketModel,
     ticketEvent: ticketEventModel,
     ticketMessage: ticketMessageModel,
+    ticketTag: ticketTagModel,
     user: userModel,
   };
 };
@@ -1130,6 +1340,13 @@ describe('Tickets integration', () => {
     };
     prismaMock.tagStore.push(urgentTag);
 
+    const regressionTag: StoredTag = {
+      color: '#f59e0b',
+      id: randomUUID(),
+      name: 'regression',
+    };
+    prismaMock.tagStore.push(regressionTag);
+
     for (const role of prismaMock.roleStore) {
       if (role.name === RoleName.CUSTOMER) {
         prismaMock.userStore.push({
@@ -1204,6 +1421,47 @@ describe('Tickets integration', () => {
         });
       }
     }
+
+    const agentRole = prismaMock.roleStore.find(
+      (role) => role.name === RoleName.AGENT,
+    )!;
+    const managerRole = prismaMock.roleStore.find(
+      (role) => role.name === RoleName.MANAGER,
+    )!;
+
+    const billingAgent: StoredUser = {
+      email: 'agent.billing@demo.test',
+      firstName: 'Bailey',
+      id: randomUUID(),
+      lastName: 'Agent',
+      passwordHash: await hash('Password1!', 12),
+      role: agentRole,
+      roleId: agentRole.id,
+    };
+    prismaMock.userStore.push(billingAgent);
+    prismaMock.teamMemberStore.push({
+      createdAt: new Date('2026-04-20T10:00:00.000Z'),
+      id: randomUUID(),
+      teamId: billingTeam.id,
+      userId: billingAgent.id,
+    });
+
+    const billingManager: StoredUser = {
+      email: 'manager.billing@demo.test',
+      firstName: 'Quinn',
+      id: randomUUID(),
+      lastName: 'Manager',
+      passwordHash: await hash('Password1!', 12),
+      role: managerRole,
+      roleId: managerRole.id,
+    };
+    prismaMock.userStore.push(billingManager);
+    prismaMock.teamMemberStore.push({
+      createdAt: new Date('2026-04-20T10:00:00.000Z'),
+      id: randomUUID(),
+      teamId: billingTeam.id,
+      userId: billingManager.id,
+    });
 
     const firstCustomer = prismaMock.userStore.find(
       (user) => user.email === 'customer@demo.test',
@@ -3414,5 +3672,625 @@ describe('Tickets integration', () => {
       )
       .expect(403);
     expect(storageMock.getSignedUrl).not.toHaveBeenCalled();
+  });
+
+  // BE-04 slice A — workflow REST endpoints
+
+  it.each([
+    { route: 'assign', body: { assigneeId: null } },
+    { route: 'status', body: { status: TicketStatus.PENDING } },
+    { route: 'priority', body: { priority: TicketPriority.HIGH } },
+    { route: 'tags', body: { tagIds: [] } },
+    { route: 'category', body: { categoryId: null } },
+    { route: 'team', body: { teamId: '00000000-0000-4000-8000-000000000000' } },
+  ])(
+    'returns 403 when a customer tries to PATCH /tickets/:id/$route',
+    async ({ route, body }) => {
+      const ticket = prismaMock.ticketStore.find(
+        (entry) => entry.subject === 'Own ticket detail',
+      )!;
+      const httpAgent = request.agent(app.getHttpServer());
+
+      await httpAgent
+        .post('/auth/login')
+        .send({ email: 'customer@demo.test', password: 'Password1!' })
+        .expect(200);
+
+      await httpAgent
+        .patch(`/tickets/${ticket.id}/${route}`)
+        .send(body)
+        .expect(403);
+
+      expect(
+        prismaMock.ticketEventStore.filter(
+          (event) =>
+            event.ticketId === ticket.id &&
+            event.type !== TicketEventType.CREATED,
+        ),
+      ).toHaveLength(0);
+    },
+  );
+
+  it('allows an agent to assign a team-member staff user and writes an ASSIGNED event', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const manager = prismaMock.userStore.find(
+      (user) => user.email === 'manager@demo.test',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await httpAgent
+      .patch(`/tickets/${ticket.id}/assign`)
+      .send({ assigneeId: manager.id })
+      .expect(200);
+
+    expect(response.body.assignee).toMatchObject({ id: manager.id });
+    expect(
+      prismaMock.ticketEventStore.find(
+        (event) =>
+          event.ticketId === ticket.id &&
+          event.type === TicketEventType.ASSIGNED,
+      ),
+    ).toBeDefined();
+  });
+
+  it('allows a manager to assign a team-member staff user on a team-owned ticket', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Team queue ticket',
+    )!;
+    const agent = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'manager@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await httpAgent
+      .patch(`/tickets/${ticket.id}/assign`)
+      .send({ assigneeId: agent.id })
+      .expect(200);
+
+    expect(response.body.assignee).toMatchObject({ id: agent.id });
+  });
+
+  it('allows an admin to assign a staff user across teams', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const billingAgent = prismaMock.userStore.find(
+      (user) => user.email === 'agent.billing@demo.test',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'admin@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await httpAgent
+      .patch(`/tickets/${ticket.id}/assign`)
+      .send({ assigneeId: billingAgent.id })
+      .expect(200);
+
+    expect(response.body.assignee).toMatchObject({ id: billingAgent.id });
+  });
+
+  it('rejects assigning a customer as the assignee with 400', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const customer = prismaMock.userStore.find(
+      (user) => user.email === 'customer@demo.test',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .patch(`/tickets/${ticket.id}/assign`)
+      .send({ assigneeId: customer.id })
+      .expect(400);
+  });
+
+  it('rejects an agent assigning a staff user who is not on the ticket team with 400', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const billingAgent = prismaMock.userStore.find(
+      (user) => user.email === 'agent.billing@demo.test',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .patch(`/tickets/${ticket.id}/assign`)
+      .send({ assigneeId: billingAgent.id })
+      .expect(400);
+  });
+
+  it('unassigns a ticket and writes a REASSIGNED event when assigneeId is null', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Assigned ticket',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'admin@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await httpAgent
+      .patch(`/tickets/${ticket.id}/assign`)
+      .send({ assigneeId: null })
+      .expect(200);
+
+    expect(response.body.assignee).toBeNull();
+    expect(
+      prismaMock.ticketEventStore.find(
+        (event) =>
+          event.ticketId === ticket.id &&
+          event.type === TicketEventType.REASSIGNED,
+      ),
+    ).toBeDefined();
+  });
+
+  it.each([
+    { from: TicketStatus.OPEN, to: TicketStatus.PENDING },
+    { from: TicketStatus.OPEN, to: TicketStatus.RESOLVED },
+    { from: TicketStatus.OPEN, to: TicketStatus.CLOSED },
+    { from: TicketStatus.PENDING, to: TicketStatus.OPEN },
+    { from: TicketStatus.PENDING, to: TicketStatus.RESOLVED },
+    { from: TicketStatus.PENDING, to: TicketStatus.CLOSED },
+    { from: TicketStatus.RESOLVED, to: TicketStatus.OPEN },
+    { from: TicketStatus.RESOLVED, to: TicketStatus.CLOSED },
+    { from: TicketStatus.CLOSED, to: TicketStatus.OPEN },
+  ])(
+    'allows staff to transition status from $from to $to and emits STATUS_CHANGED',
+    async ({ from, to }) => {
+      const ticket = prismaMock.ticketStore.find(
+        (entry) => entry.subject === 'Urgent team ticket',
+      )!;
+      ticket.status = from;
+      const httpAgent = request.agent(app.getHttpServer());
+
+      await httpAgent
+        .post('/auth/login')
+        .send({ email: 'agent@demo.test', password: 'Password1!' })
+        .expect(200);
+
+      const response = await httpAgent
+        .patch(`/tickets/${ticket.id}/status`)
+        .send({ status: to })
+        .expect(200);
+
+      expect(response.body.status).toBe(to);
+      const event = prismaMock.ticketEventStore.find(
+        (entry) =>
+          entry.ticketId === ticket.id &&
+          entry.type === TicketEventType.STATUS_CHANGED,
+      );
+      expect(event).toBeDefined();
+      expect(event!.metadata).toMatchObject({ fromStatus: from, toStatus: to });
+    },
+  );
+
+  it.each([
+    { from: TicketStatus.RESOLVED, to: TicketStatus.PENDING },
+    { from: TicketStatus.CLOSED, to: TicketStatus.PENDING },
+    { from: TicketStatus.CLOSED, to: TicketStatus.RESOLVED },
+  ])(
+    'returns 400 for the disallowed staff transition $from to $to',
+    async ({ from, to }) => {
+      const ticket = prismaMock.ticketStore.find(
+        (entry) => entry.subject === 'Urgent team ticket',
+      )!;
+      ticket.status = from;
+      const httpAgent = request.agent(app.getHttpServer());
+
+      await httpAgent
+        .post('/auth/login')
+        .send({ email: 'agent@demo.test', password: 'Password1!' })
+        .expect(200);
+
+      await httpAgent
+        .patch(`/tickets/${ticket.id}/status`)
+        .send({ status: to })
+        .expect(400);
+
+      expect(
+        prismaMock.ticketEventStore.find(
+          (entry) =>
+            entry.ticketId === ticket.id &&
+            entry.type === TicketEventType.STATUS_CHANGED,
+        ),
+      ).toBeUndefined();
+    },
+  );
+
+  it('updates ticket priority and emits PRIORITY_CHANGED with from/to metadata', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const fromPriority = ticket.priority;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await httpAgent
+      .patch(`/tickets/${ticket.id}/priority`)
+      .send({ priority: TicketPriority.LOW })
+      .expect(200);
+
+    expect(response.body.priority).toBe(TicketPriority.LOW);
+    const event = prismaMock.ticketEventStore.find(
+      (entry) =>
+        entry.ticketId === ticket.id &&
+        entry.type === TicketEventType.PRIORITY_CHANGED,
+    );
+    expect(event).toBeDefined();
+    expect(event!.metadata).toMatchObject({
+      fromPriority,
+      toPriority: TicketPriority.LOW,
+    });
+  });
+
+  it('replaces ticket tags as a full set and emits TAGGED with added and removed', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const urgentTag = prismaMock.tagStore.find((tag) => tag.name === 'urgent')!;
+    const regressionTag = prismaMock.tagStore.find(
+      (tag) => tag.name === 'regression',
+    )!;
+    prismaMock.ticketTagStore.push({
+      tagId: urgentTag.id,
+      ticketId: ticket.id,
+    });
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await httpAgent
+      .patch(`/tickets/${ticket.id}/tags`)
+      .send({ tagIds: [regressionTag.id] })
+      .expect(200);
+
+    expect(response.body.tags.map((tag: { id: string }) => tag.id)).toEqual([
+      regressionTag.id,
+    ]);
+    const event = prismaMock.ticketEventStore.find(
+      (entry) =>
+        entry.ticketId === ticket.id && entry.type === TicketEventType.TAGGED,
+    );
+    expect(event).toBeDefined();
+    expect(event!.metadata).toMatchObject({
+      added: [regressionTag.id],
+      removed: [urgentTag.id],
+    });
+  });
+
+  it('returns 400 when PATCH /tickets/:id/tags references an unknown tag ID', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .patch(`/tickets/${ticket.id}/tags`)
+      .send({ tagIds: ['00000000-0000-4000-8000-000000000000'] })
+      .expect(400);
+
+    expect(
+      prismaMock.ticketEventStore.find(
+        (entry) =>
+          entry.ticketId === ticket.id && entry.type === TicketEventType.TAGGED,
+      ),
+    ).toBeUndefined();
+  });
+
+  it('updates the ticket category, leaves teamId untouched, and emits CATEGORIZED', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const fromCategoryId = ticket.categoryId;
+    const fromTeamId = ticket.teamId;
+    const billingCategory = prismaMock.categoryStore.find(
+      (category) => category.name === 'Billing',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await httpAgent
+      .patch(`/tickets/${ticket.id}/category`)
+      .send({ categoryId: billingCategory.id })
+      .expect(200);
+
+    expect(response.body.category).toMatchObject({ id: billingCategory.id });
+    expect(response.body.team?.id ?? null).toBe(fromTeamId);
+    expect(ticket.teamId).toBe(fromTeamId);
+    const event = prismaMock.ticketEventStore.find(
+      (entry) =>
+        entry.ticketId === ticket.id &&
+        entry.type === TicketEventType.CATEGORIZED,
+    );
+    expect(event).toBeDefined();
+    expect(event!.metadata).toMatchObject({
+      fromCategoryId,
+      toCategoryId: billingCategory.id,
+    });
+  });
+
+  it('clears the ticket category when PATCH /tickets/:id/category receives null', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await httpAgent
+      .patch(`/tickets/${ticket.id}/category`)
+      .send({ categoryId: null })
+      .expect(200);
+
+    expect(response.body.category).toBeNull();
+  });
+
+  it('allows a manager who belongs to the destination team to transfer the ticket', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const billingTeam = prismaMock.teamStore.find(
+      (team) => team.name === 'Billing',
+    )!;
+    prismaMock.teamMemberStore.push({
+      createdAt: new Date('2026-04-20T10:00:00.000Z'),
+      id: randomUUID(),
+      teamId: billingTeam.id,
+      userId: prismaMock.userStore.find(
+        (user) => user.email === 'manager@demo.test',
+      )!.id,
+    });
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'manager@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await httpAgent
+      .patch(`/tickets/${ticket.id}/team`)
+      .send({ teamId: billingTeam.id })
+      .expect(200);
+
+    expect(response.body.team).toMatchObject({ id: billingTeam.id });
+    expect(
+      prismaMock.ticketEventStore.find(
+        (entry) =>
+          entry.ticketId === ticket.id &&
+          entry.type === TicketEventType.TEAM_TRANSFERRED,
+      ),
+    ).toBeDefined();
+  });
+
+  it('allows an admin to transfer a ticket across teams', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const billingTeam = prismaMock.teamStore.find(
+      (team) => team.name === 'Billing',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'admin@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await httpAgent
+      .patch(`/tickets/${ticket.id}/team`)
+      .send({ teamId: billingTeam.id })
+      .expect(200);
+
+    expect(response.body.team).toMatchObject({ id: billingTeam.id });
+  });
+
+  it('atomically clears an invalid assignee when transferring teams and emits both events', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Assigned ticket',
+    )!;
+    const fromAssigneeId = ticket.assigneeId;
+    const billingTeam = prismaMock.teamStore.find(
+      (team) => team.name === 'Billing',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'admin@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await httpAgent
+      .patch(`/tickets/${ticket.id}/team`)
+      .send({ teamId: billingTeam.id })
+      .expect(200);
+
+    expect(response.body.assignee).toBeNull();
+    expect(ticket.assigneeId).toBeNull();
+    const events = prismaMock.ticketEventStore.filter(
+      (entry) => entry.ticketId === ticket.id,
+    );
+    const transferEvent = events.find(
+      (entry) => entry.type === TicketEventType.TEAM_TRANSFERRED,
+    );
+    const reassignedEvent = events.find(
+      (entry) => entry.type === TicketEventType.REASSIGNED,
+    );
+    expect(transferEvent).toBeDefined();
+    expect(reassignedEvent).toBeDefined();
+    expect(reassignedEvent!.metadata).toMatchObject({
+      fromAssigneeId,
+      toAssigneeId: null,
+    });
+  });
+
+  it('returns 403 when an agent tries to transfer a ticket team', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const billingTeam = prismaMock.teamStore.find(
+      (team) => team.name === 'Billing',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .patch(`/tickets/${ticket.id}/team`)
+      .send({ teamId: billingTeam.id })
+      .expect(403);
+  });
+
+  it('returns 403 when a manager tries to transfer to a team they do not belong to', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const billingTeam = prismaMock.teamStore.find(
+      (team) => team.name === 'Billing',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'manager@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .patch(`/tickets/${ticket.id}/team`)
+      .send({ teamId: billingTeam.id })
+      .expect(403);
+  });
+
+  it('returns the existing tag list from GET /tickets/tags ordered by name', async () => {
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await httpAgent.get('/tickets/tags').expect(200);
+
+    const names = (response.body as Array<{ name: string }>).map(
+      (tag) => tag.name,
+    );
+    expect(names).toEqual(['regression', 'urgent']);
+  });
+
+  it('returns team-scoped assignable users for an agent on a team ticket', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await httpAgent
+      .get(`/tickets/${ticket.id}/assignable-users`)
+      .expect(200);
+
+    const emails = (response.body as Array<{ email: string }>).map(
+      (user) => user.email,
+    );
+    expect(emails).toContain('agent@demo.test');
+    expect(emails).toContain('manager@demo.test');
+    expect(emails).not.toContain('agent.billing@demo.test');
+    expect(emails).not.toContain('manager.billing@demo.test');
+    expect(emails).not.toContain('admin@demo.test');
+    expect(emails).not.toContain('customer@demo.test');
+  });
+
+  it('returns cross-team assignable users for an admin', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'admin@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await httpAgent
+      .get(`/tickets/${ticket.id}/assignable-users`)
+      .expect(200);
+
+    const emails = (response.body as Array<{ email: string }>).map(
+      (user) => user.email,
+    );
+    expect(emails).toEqual(
+      expect.arrayContaining([
+        'agent@demo.test',
+        'manager@demo.test',
+        'admin@demo.test',
+        'agent.billing@demo.test',
+        'manager.billing@demo.test',
+      ]),
+    );
+    expect(emails).not.toContain('customer@demo.test');
+  });
+
+  it('returns 403 when a customer requests assignable users', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Own ticket detail',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'customer@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent.get(`/tickets/${ticket.id}/assignable-users`).expect(403);
   });
 });

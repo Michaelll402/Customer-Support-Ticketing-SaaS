@@ -39,6 +39,8 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { validationPipeOptions } from '../../common/validation/validation.pipe-options';
+import { AssignTicketDto } from './dto/assign-ticket.dto';
+import { AssignableUserDto } from './dto/assignable-user.dto';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { CreateTicketMessageDto } from './dto/create-ticket-message.dto';
 import {
@@ -55,8 +57,14 @@ import {
 } from './dto/ticket-list-query.dto';
 import { TicketListResponseDto } from './dto/ticket-list-response.dto';
 import { TicketMessageDto } from './dto/ticket-message.dto';
+import { TicketTagOptionDto } from './dto/ticket-tag-option.dto';
 import { TicketTimelineDto } from './dto/ticket-timeline.dto';
+import { TransferTicketTeamDto } from './dto/transfer-ticket-team.dto';
+import { UpdateTicketCategoryDto } from './dto/update-ticket-category.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
+import { UpdateTicketPriorityDto } from './dto/update-ticket-priority.dto';
+import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
+import { UpdateTicketTagsDto } from './dto/update-ticket-tags.dto';
 import {
   type TicketAttachmentUploadFile,
   TICKET_ATTACHMENT_MAX_BYTES,
@@ -167,6 +175,25 @@ export class TicketsController {
   })
   listTicketCategories() {
     return this.ticketsService.listTicketCategories();
+  }
+
+  @Get('tags')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({
+    summary:
+      'Return the read-only ticket tag options used by staff workflow controls.',
+  })
+  @ApiOkResponse({
+    description: 'Ticket tags returned successfully.',
+    type: TicketTagOptionDto,
+    isArray: true,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Authentication is required.',
+  })
+  listTicketTags() {
+    return this.ticketsService.listTicketTags();
   }
 
   @Post()
@@ -388,6 +415,282 @@ export class TicketsController {
     @Param('id', new ParseUUIDPipe()) ticketId: string,
   ) {
     return this.ticketsService.getTicketTimeline(ticketId, request.user);
+  }
+
+  @Get(':id/assignable-users')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleName.AGENT, RoleName.MANAGER, RoleName.ADMIN)
+  @ApiOperation({
+    summary:
+      'Return the staff users who can be assigned to this ticket, scoped to the actor role.',
+  })
+  @ApiOkResponse({
+    description: 'Assignable users returned successfully.',
+    type: AssignableUserDto,
+    isArray: true,
+  })
+  @ApiForbiddenResponse({
+    description: 'The authenticated user cannot access this ticket.',
+  })
+  @ApiNotFoundResponse({
+    description: 'Ticket was not found.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Authentication is required.',
+  })
+  listAssignableUsers(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', new ParseUUIDPipe()) ticketId: string,
+  ) {
+    return this.ticketsService.listAssignableUsers(ticketId, request.user);
+  }
+
+  @Patch(':id/assign')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleName.AGENT, RoleName.MANAGER, RoleName.ADMIN)
+  @ApiOperation({
+    summary:
+      'Assign or unassign a ticket to a staff user within the actor role and team scope.',
+  })
+  @ApiBody({
+    type: AssignTicketDto,
+  })
+  @ApiOkResponse({
+    description: 'Ticket assignment updated successfully.',
+    type: TicketDetailDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'The assignee does not exist, is not a staff user, or does not belong to the ticket team.',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'The authenticated user cannot access this ticket or perform this assignment.',
+  })
+  @ApiNotFoundResponse({
+    description: 'Ticket was not found.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Authentication is required.',
+  })
+  assignTicket(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', new ParseUUIDPipe()) ticketId: string,
+    @Body(
+      new ValidationPipe({
+        ...validationPipeOptions,
+        expectedType: AssignTicketDto,
+      }),
+    )
+    body: AssignTicketDto,
+  ) {
+    return this.ticketsService.assignTicket(ticketId, request.user, body);
+  }
+
+  @Patch(':id/status')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleName.AGENT, RoleName.MANAGER, RoleName.ADMIN)
+  @ApiOperation({
+    summary:
+      'Update ticket status within the staff transition matrix. Customer close and reopen remain on PATCH /tickets/:id.',
+  })
+  @ApiBody({
+    type: UpdateTicketStatusDto,
+  })
+  @ApiOkResponse({
+    description: 'Ticket status updated successfully.',
+    type: TicketDetailDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'The requested status transition is not allowed.',
+  })
+  @ApiForbiddenResponse({
+    description: 'The authenticated user cannot access this ticket.',
+  })
+  @ApiNotFoundResponse({
+    description: 'Ticket was not found.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Authentication is required.',
+  })
+  updateTicketStatus(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', new ParseUUIDPipe()) ticketId: string,
+    @Body(
+      new ValidationPipe({
+        ...validationPipeOptions,
+        expectedType: UpdateTicketStatusDto,
+      }),
+    )
+    body: UpdateTicketStatusDto,
+  ) {
+    return this.ticketsService.updateTicketStatus(ticketId, request.user, body);
+  }
+
+  @Patch(':id/priority')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleName.AGENT, RoleName.MANAGER, RoleName.ADMIN)
+  @ApiOperation({
+    summary: 'Update ticket priority.',
+  })
+  @ApiBody({
+    type: UpdateTicketPriorityDto,
+  })
+  @ApiOkResponse({
+    description: 'Ticket priority updated successfully.',
+    type: TicketDetailDto,
+  })
+  @ApiForbiddenResponse({
+    description: 'The authenticated user cannot access this ticket.',
+  })
+  @ApiNotFoundResponse({
+    description: 'Ticket was not found.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Authentication is required.',
+  })
+  updateTicketPriority(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', new ParseUUIDPipe()) ticketId: string,
+    @Body(
+      new ValidationPipe({
+        ...validationPipeOptions,
+        expectedType: UpdateTicketPriorityDto,
+      }),
+    )
+    body: UpdateTicketPriorityDto,
+  ) {
+    return this.ticketsService.updateTicketPriority(
+      ticketId,
+      request.user,
+      body,
+    );
+  }
+
+  @Patch(':id/tags')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleName.AGENT, RoleName.MANAGER, RoleName.ADMIN)
+  @ApiOperation({
+    summary:
+      'Replace the full tag set on a ticket. All tag IDs must already exist.',
+  })
+  @ApiBody({
+    type: UpdateTicketTagsDto,
+  })
+  @ApiOkResponse({
+    description: 'Ticket tags updated successfully.',
+    type: TicketDetailDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'One or more tag IDs do not exist.',
+  })
+  @ApiForbiddenResponse({
+    description: 'The authenticated user cannot access this ticket.',
+  })
+  @ApiNotFoundResponse({
+    description: 'Ticket was not found.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Authentication is required.',
+  })
+  updateTicketTags(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', new ParseUUIDPipe()) ticketId: string,
+    @Body(
+      new ValidationPipe({
+        ...validationPipeOptions,
+        expectedType: UpdateTicketTagsDto,
+      }),
+    )
+    body: UpdateTicketTagsDto,
+  ) {
+    return this.ticketsService.updateTicketTags(ticketId, request.user, body);
+  }
+
+  @Patch(':id/category')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleName.AGENT, RoleName.MANAGER, RoleName.ADMIN)
+  @ApiOperation({
+    summary:
+      'Update the ticket category. The team is not re-routed when the category changes.',
+  })
+  @ApiBody({
+    type: UpdateTicketCategoryDto,
+  })
+  @ApiOkResponse({
+    description: 'Ticket category updated successfully.',
+    type: TicketDetailDto,
+  })
+  @ApiForbiddenResponse({
+    description: 'The authenticated user cannot access this ticket.',
+  })
+  @ApiNotFoundResponse({
+    description: 'Ticket or category was not found.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Authentication is required.',
+  })
+  updateTicketCategory(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', new ParseUUIDPipe()) ticketId: string,
+    @Body(
+      new ValidationPipe({
+        ...validationPipeOptions,
+        expectedType: UpdateTicketCategoryDto,
+      }),
+    )
+    body: UpdateTicketCategoryDto,
+  ) {
+    return this.ticketsService.updateTicketCategory(
+      ticketId,
+      request.user,
+      body,
+    );
+  }
+
+  @Patch(':id/team')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleName.MANAGER, RoleName.ADMIN)
+  @ApiOperation({
+    summary:
+      'Transfer the ticket to another team. The assignee is cleared atomically if they are not a member of the destination team.',
+  })
+  @ApiBody({
+    type: TransferTicketTeamDto,
+  })
+  @ApiOkResponse({
+    description: 'Ticket team transferred successfully.',
+    type: TicketDetailDto,
+  })
+  @ApiForbiddenResponse({
+    description:
+      'The authenticated user cannot access this ticket or cannot transfer to the destination team.',
+  })
+  @ApiNotFoundResponse({
+    description: 'Ticket or destination team was not found.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Authentication is required.',
+  })
+  transferTicketTeam(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', new ParseUUIDPipe()) ticketId: string,
+    @Body(
+      new ValidationPipe({
+        ...validationPipeOptions,
+        expectedType: TransferTicketTeamDto,
+      }),
+    )
+    body: TransferTicketTeamDto,
+  ) {
+    return this.ticketsService.transferTicketTeam(ticketId, request.user, body);
   }
 
   @Patch(':id')
