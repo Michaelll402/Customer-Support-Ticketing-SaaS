@@ -58,6 +58,7 @@ import {
 import { TicketListResponseDto } from './dto/ticket-list-response.dto';
 import { TicketMessageDto } from './dto/ticket-message.dto';
 import { TicketTagOptionDto } from './dto/ticket-tag-option.dto';
+import { TicketTeamOptionDto } from './dto/ticket-team-option.dto';
 import { TicketTimelineDto } from './dto/ticket-timeline.dto';
 import { TransferTicketTeamDto } from './dto/transfer-ticket-team.dto';
 import { UpdateTicketCategoryDto } from './dto/update-ticket-category.dto';
@@ -194,6 +195,25 @@ export class TicketsController {
   })
   listTicketTags() {
     return this.ticketsService.listTicketTags();
+  }
+
+  @Get('teams')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({
+    summary:
+      'Return the read-only ticket team options used by staff team-transfer controls.',
+  })
+  @ApiOkResponse({
+    description: 'Ticket teams returned successfully.',
+    type: TicketTeamOptionDto,
+    isArray: true,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Authentication is required.',
+  })
+  listTicketTeams() {
+    return this.ticketsService.listTicketTeams();
   }
 
   @Post()

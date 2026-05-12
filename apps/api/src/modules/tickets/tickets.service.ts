@@ -33,6 +33,7 @@ import { TicketDetailDto } from './dto/ticket-detail.dto';
 import { TicketCategoryOptionDto } from './dto/ticket-category-option.dto';
 import { TicketMessageDto } from './dto/ticket-message.dto';
 import { TicketTagOptionDto } from './dto/ticket-tag-option.dto';
+import { TicketTeamOptionDto } from './dto/ticket-team-option.dto';
 import type { CreateTicketDto } from './dto/create-ticket.dto';
 import type { CreateTicketMessageDto } from './dto/create-ticket-message.dto';
 import { SortOrder, TicketListSortBy } from './dto/ticket-list-query.dto';
@@ -1210,6 +1211,16 @@ export class TicketsService {
     });
 
     return tags.map((tag) => TicketTagOptionDto.fromTag(tag));
+  }
+
+  async listTicketTeams(): Promise<TicketTeamOptionDto[]> {
+    const teams = await this.prisma.team.findMany({
+      orderBy: {
+        name: 'asc',
+      },
+    });
+
+    return teams.map((team) => TicketTeamOptionDto.fromTeam(team));
   }
 
   async listAssignableUsers(

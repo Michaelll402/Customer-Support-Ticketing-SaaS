@@ -778,6 +778,25 @@ const createPrismaMock = () => {
         return null;
       },
     ),
+    findMany: vi.fn(
+      async ({
+        orderBy,
+      }: {
+        orderBy?: { name?: 'asc' | 'desc' };
+      } = {}) => {
+        const results = [...teams];
+
+        if (orderBy?.name) {
+          results.sort((left, right) =>
+            orderBy.name === 'asc'
+              ? left.name.localeCompare(right.name)
+              : right.name.localeCompare(left.name),
+          );
+        }
+
+        return results;
+      },
+    ),
   };
 
   const ticketModel = {
@@ -4760,5 +4779,73 @@ describe('Tickets integration', () => {
           event.type === TicketEventType.PRIORITY_CHANGED,
       ),
     ).toBeDefined();
+  });
+
+  // BE-04 team options endpoint
+
+  it('requires authentication for GET /tickets/teams', async () => {
+    await request(app.getHttpServer()).get('/tickets/teams').expect(401);
+  });
+
+  it('returns the existing teams from GET /tickets/teams with id, name, and description', async () => {
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await httpAgent.get('/tickets/teams').expect(200);
+
+    const teams = response.body as Array<{
+      description: string | null;
+      id: string;
+      name: string;
+    }>;
+    expect(teams.length).toBeGreaterThanOrEqual(2);
+    const technicalSupport = teams.find(
+      (team) => team.name === 'Technical Support',
+    );
+    expect(technicalSupport).toMatchObject({
+      description: 'Primary queue for technical incidents.',
+    });
+    expect(technicalSupport!.id).toEqual(expect.any(String));
+    expect(teams.every((team) => 'id' in team && 'description' in team)).toBe(
+      true,
+    );
+  });
+
+  it('sorts GET /tickets/teams alphabetically by name', async () => {
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await httpAgent.get('/tickets/teams').expect(200);
+
+    const names = (response.body as Array<{ name: string }>).map(
+      (team) => team.name,
+    );
+    expect(names).toEqual(['Billing', 'Technical Support']);
+  });
+
+  it('routes GET /tickets/teams to the static team handler, not the :id detail handler', async () => {
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'admin@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await httpAgent.get('/tickets/teams').expect(200);
+
+    expect(Array.isArray(response.body)).toBe(true);
+    const body = response.body as unknown[];
+    expect(body.length).toBeGreaterThan(0);
+    const first = body[0] as { description?: unknown; subject?: unknown };
+    expect(first).toHaveProperty('description');
+    expect(first).not.toHaveProperty('subject');
   });
 });
