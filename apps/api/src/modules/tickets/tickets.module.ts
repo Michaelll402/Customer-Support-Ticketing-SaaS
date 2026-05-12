@@ -2,12 +2,13 @@ import { Module } from '@nestjs/common';
 
 import { PrismaModule } from '../../common/database/prisma.module';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { QueueModule } from '../queue/queue.module';
 import { StorageModule } from '../storage/storage.module';
 import { TicketsController } from './tickets.controller';
 import { TicketsService } from './tickets.service';
 
 @Module({
-  imports: [PrismaModule, StorageModule],
+  imports: [PrismaModule, StorageModule, QueueModule],
   controllers: [TicketsController],
   providers: [TicketsService, RolesGuard],
 })

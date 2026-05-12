@@ -4,6 +4,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import {
+  NotificationType,
   RoleName,
   TicketEventType,
   TicketPriority,
@@ -19,6 +20,7 @@ import { apiConfiguration } from '../../common/config/api.configuration';
 import { validateApiEnv } from '../../common/config/env.validation';
 import { validationPipeOptions } from '../../common/validation/validation.pipe-options';
 import { AuthModule } from '../auth/auth.module';
+import { QueueService } from '../queue/queue.service';
 import { StorageService } from '../storage/storage.service';
 import { TicketsModule } from './tickets.module';
 
@@ -156,6 +158,7 @@ type UpdateArgs = {
     description?: string;
     events?: {
       create: {
+        id?: string;
         actorId: string | null;
         metadata?: Prisma.JsonValue;
         type: TicketEventType;
@@ -212,6 +215,9 @@ type TeamMemberFindFirstArgs = {
 
 type UserFindManyArgs = {
   where?: {
+    id?: {
+      in?: string[];
+    };
     role?: {
       name?: {
         in?: RoleName[];
@@ -230,6 +236,15 @@ type UserFindManyArgs = {
     firstName?: 'asc' | 'desc';
     lastName?: 'asc' | 'desc';
   }>;
+};
+
+type TeamMemberFindManyArgs = {
+  where?: {
+    teamId?: string;
+  };
+  select?: {
+    userId?: boolean;
+  };
 };
 
 type TicketMessageCreateArgs = {
@@ -589,6 +604,10 @@ const createPrismaMock = () => {
     ),
     findMany: vi.fn(async ({ where, orderBy }: UserFindManyArgs = {}) => {
       const results = users.filter((user) => {
+        if (where?.id?.in && !where.id.in.includes(user.id)) {
+          return false;
+        }
+
         if (
           where?.role?.name?.in &&
           !where.role.name.in.includes(user.role.name)
@@ -698,6 +717,12 @@ const createPrismaMock = () => {
         }) ?? null
       );
     }),
+    findMany: vi.fn(async ({ where }: TeamMemberFindManyArgs = {}) =>
+      teamMembers.filter((member) => {
+        if (where?.teamId && member.teamId !== where.teamId) return false;
+        return true;
+      }),
+    ),
   };
 
   const categoryModel = {
@@ -886,7 +911,7 @@ const createPrismaMock = () => {
         ticketEvents.push({
           actorId: data.events.create.actorId,
           createdAt: now,
-          id: randomUUID(),
+          id: data.events.create.id ?? randomUUID(),
           metadata: data.events.create.metadata ?? null,
           ticketId: ticket.id,
           type: data.events.create.type,
@@ -1257,6 +1282,9 @@ describe('Tickets integration', () => {
     getSignedUrl: ReturnType<typeof vi.fn>;
     upload: ReturnType<typeof vi.fn>;
   };
+  let queueMock: {
+    enqueueNotification: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(async () => {
     originalEnv = { ...process.env };
@@ -1287,6 +1315,9 @@ describe('Tickets integration', () => {
       upload: vi.fn().mockResolvedValue({
         key: 'tickets/test/attachments/file.txt',
       }),
+    };
+    queueMock = {
+      enqueueNotification: vi.fn().mockResolvedValue(undefined),
     };
 
     const technicalTeam: StoredTeam = {
@@ -1624,6 +1655,8 @@ describe('Tickets integration', () => {
       .useValue(prismaMock as unknown as PrismaService)
       .overrideProvider(StorageService)
       .useValue(storageMock)
+      .overrideProvider(QueueService)
+      .useValue(queueMock)
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -4292,5 +4325,313 @@ describe('Tickets integration', () => {
       .expect(200);
 
     await httpAgent.get(`/tickets/${ticket.id}/assignable-users`).expect(403);
+  });
+
+  // BE-04 slice C — notification producers
+
+  it('enqueues TICKET_REPLIED for requester and assignee, excluding a staff author', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Assigned ticket',
+    )!;
+    const requester = prismaMock.userStore.find(
+      (user) => user.id === ticket.requesterId,
+    )!;
+    const assignee = prismaMock.userStore.find(
+      (user) => user.id === ticket.assigneeId!,
+    )!;
+    ticket.status = TicketStatus.OPEN;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .post(`/tickets/${ticket.id}/replies`)
+      .send({ body: 'Working on it.' })
+      .expect(201);
+
+    expect(queueMock.enqueueNotification).toHaveBeenCalledTimes(1);
+    const [payload, jobId] = queueMock.enqueueNotification.mock.calls[0]!;
+    expect(payload).toMatchObject({
+      type: NotificationType.TICKET_REPLIED,
+      ticketId: ticket.id,
+    });
+    expect(payload.recipientUserIds).toEqual(
+      expect.arrayContaining([requester.id]),
+    );
+    expect(payload.recipientUserIds).not.toContain(assignee.id);
+    expect(typeof jobId).toBe('string');
+  });
+
+  it('does not enqueue the customer author when a customer replies to their own ticket', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Own ticket detail',
+    )!;
+    const customer = prismaMock.userStore.find(
+      (user) => user.email === 'customer@demo.test',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'customer@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .post(`/tickets/${ticket.id}/replies`)
+      .send({ body: 'Any update?' })
+      .expect(201);
+
+    if (queueMock.enqueueNotification.mock.calls.length > 0) {
+      const [payload] = queueMock.enqueueNotification.mock.calls[0]!;
+      expect(payload.recipientUserIds).not.toContain(customer.id);
+    }
+  });
+
+  it('enqueues NOTE_ADDED for assignee plus team members excluding customers and the author', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Assigned ticket',
+    )!;
+    const agent = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
+    )!;
+    const manager = prismaMock.userStore.find(
+      (user) => user.email === 'manager@demo.test',
+    )!;
+    const requester = prismaMock.userStore.find(
+      (user) => user.id === ticket.requesterId,
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .post(`/tickets/${ticket.id}/internal-notes`)
+      .send({ body: 'Private context for the team.' })
+      .expect(201);
+
+    expect(queueMock.enqueueNotification).toHaveBeenCalledTimes(1);
+    const [payload] = queueMock.enqueueNotification.mock.calls[0]!;
+    expect(payload.type).toBe(NotificationType.NOTE_ADDED);
+    expect(payload.recipientUserIds).toEqual(
+      expect.arrayContaining([manager.id]),
+    );
+    expect(payload.recipientUserIds).not.toContain(agent.id);
+    expect(payload.recipientUserIds).not.toContain(requester.id);
+  });
+
+  it('never enqueues a customer recipient for an internal note even with weird team membership', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Team queue ticket',
+    )!;
+    const technicalTeam = prismaMock.teamStore.find(
+      (team) => team.name === 'Technical Support',
+    )!;
+    const customer = prismaMock.userStore.find(
+      (user) => user.email === 'customer@demo.test',
+    )!;
+    prismaMock.teamMemberStore.push({
+      createdAt: new Date('2026-04-20T10:00:00.000Z'),
+      id: randomUUID(),
+      teamId: technicalTeam.id,
+      userId: customer.id,
+    });
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .post(`/tickets/${ticket.id}/internal-notes`)
+      .send({ body: 'Sensitive staff note.' })
+      .expect(201);
+
+    if (queueMock.enqueueNotification.mock.calls.length > 0) {
+      const [payload] = queueMock.enqueueNotification.mock.calls[0]!;
+      expect(payload.recipientUserIds).not.toContain(customer.id);
+    }
+  });
+
+  it('enqueues TICKET_ASSIGNED for the new assignee on assignment', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const manager = prismaMock.userStore.find(
+      (user) => user.email === 'manager@demo.test',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .patch(`/tickets/${ticket.id}/assign`)
+      .send({ assigneeId: manager.id })
+      .expect(200);
+
+    expect(queueMock.enqueueNotification).toHaveBeenCalledTimes(1);
+    const [payload, jobId] = queueMock.enqueueNotification.mock.calls[0]!;
+    expect(payload.type).toBe(NotificationType.TICKET_ASSIGNED);
+    expect(payload.recipientUserIds).toEqual([manager.id]);
+    expect(typeof jobId).toBe('string');
+  });
+
+  it('does not enqueue TICKET_ASSIGNED when unassigning a ticket', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Assigned ticket',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'admin@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .patch(`/tickets/${ticket.id}/assign`)
+      .send({ assigneeId: null })
+      .expect(200);
+
+    expect(queueMock.enqueueNotification).not.toHaveBeenCalled();
+  });
+
+  it('enqueues STATUS_CHANGED for requester and assignee excluding the staff actor', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Assigned ticket',
+    )!;
+    ticket.status = TicketStatus.OPEN;
+    const requester = prismaMock.userStore.find(
+      (user) => user.id === ticket.requesterId,
+    )!;
+    const assignee = prismaMock.userStore.find(
+      (user) => user.id === ticket.assigneeId!,
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .patch(`/tickets/${ticket.id}/status`)
+      .send({ status: TicketStatus.RESOLVED })
+      .expect(200);
+
+    expect(queueMock.enqueueNotification).toHaveBeenCalledTimes(1);
+    const [payload] = queueMock.enqueueNotification.mock.calls[0]!;
+    expect(payload.type).toBe(NotificationType.STATUS_CHANGED);
+    expect(payload.recipientUserIds).toEqual(
+      expect.arrayContaining([requester.id]),
+    );
+    expect(payload.recipientUserIds).not.toContain(assignee.id);
+  });
+
+  it.each([
+    {
+      label: 'priority',
+      route: 'priority',
+      body: { priority: TicketPriority.LOW },
+    },
+    {
+      label: 'category null',
+      route: 'category',
+      body: { categoryId: null },
+    },
+    {
+      label: 'tags empty',
+      route: 'tags',
+      body: { tagIds: [] },
+    },
+  ])(
+    'does not enqueue any notification when staff changes ticket $label',
+    async ({ route, body }) => {
+      const ticket = prismaMock.ticketStore.find(
+        (entry) => entry.subject === 'Urgent team ticket',
+      )!;
+      const httpAgent = request.agent(app.getHttpServer());
+
+      await httpAgent
+        .post('/auth/login')
+        .send({ email: 'agent@demo.test', password: 'Password1!' })
+        .expect(200);
+
+      await httpAgent
+        .patch(`/tickets/${ticket.id}/${route}`)
+        .send(body)
+        .expect(200);
+
+      expect(queueMock.enqueueNotification).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not enqueue any notification when a manager transfers the ticket team', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const billingTeam = prismaMock.teamStore.find(
+      (team) => team.name === 'Billing',
+    )!;
+    prismaMock.teamMemberStore.push({
+      createdAt: new Date('2026-04-20T10:00:00.000Z'),
+      id: randomUUID(),
+      teamId: billingTeam.id,
+      userId: prismaMock.userStore.find(
+        (user) => user.email === 'manager@demo.test',
+      )!.id,
+    });
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'manager@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .patch(`/tickets/${ticket.id}/team`)
+      .send({ teamId: billingTeam.id })
+      .expect(200);
+
+    expect(queueMock.enqueueNotification).not.toHaveBeenCalled();
+  });
+
+  it('still returns 200 and persists the TicketEvent when QueueService.enqueueNotification rejects', async () => {
+    queueMock.enqueueNotification.mockRejectedValueOnce(
+      new Error('Queue unavailable'),
+    );
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const manager = prismaMock.userStore.find(
+      (user) => user.email === 'manager@demo.test',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .patch(`/tickets/${ticket.id}/assign`)
+      .send({ assigneeId: manager.id })
+      .expect(200);
+
+    expect(
+      prismaMock.ticketEventStore.find(
+        (event) =>
+          event.ticketId === ticket.id &&
+          event.type === TicketEventType.ASSIGNED,
+      ),
+    ).toBeDefined();
   });
 });

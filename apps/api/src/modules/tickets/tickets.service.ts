@@ -5,10 +5,12 @@ import {
   Inject,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import {
+  NotificationType,
   Prisma,
   RoleName,
   TicketEventType,
@@ -18,6 +20,8 @@ import {
 import { randomUUID } from 'node:crypto';
 
 import type { AccessTokenPayload } from '../auth/auth.types';
+import { QueueService } from '../queue/queue.service';
+import type { NotificationJobPayload } from '../queue/queue.constants';
 import { StorageService } from '../storage/storage.service';
 import { PrismaService } from '../../common/database/prisma.service';
 import type { AssignTicketDto } from './dto/assign-ticket.dto';
@@ -203,9 +207,12 @@ export type TicketAttachmentUploadFile = {
 
 @Injectable()
 export class TicketsService {
+  private readonly logger = new Logger(TicketsService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(StorageService) private readonly storage: StorageService,
+    @Inject(QueueService) private readonly queueService: QueueService,
   ) {}
 
   async listTicketCategories(): Promise<TicketCategoryOptionDto[]> {
@@ -479,6 +486,12 @@ export class TicketsService {
       type: TicketEventType.REPLIED,
     });
 
+    await this.produceReplyNotification(
+      visibleTicket.id,
+      viewer.sub,
+      message.id,
+    );
+
     return TicketMessageDto.fromRecord(message);
   }
 
@@ -504,6 +517,12 @@ export class TicketsService {
       ticketId: visibleTicket.id,
       type: TicketEventType.NOTE_ADDED,
     });
+
+    await this.produceInternalNoteNotification(
+      visibleTicket.id,
+      viewer.sub,
+      message.id,
+    );
 
     return TicketMessageDto.fromRecord(message);
   }
@@ -750,6 +769,7 @@ export class TicketsService {
       visibleTicket.assigneeId === null && input.assigneeId !== null
         ? TicketEventType.ASSIGNED
         : TicketEventType.REASSIGNED;
+    const eventId = randomUUID();
 
     const updated = await this.prisma.ticket.update({
       where: {
@@ -759,6 +779,7 @@ export class TicketsService {
         assigneeId: input.assigneeId,
         events: {
           create: {
+            id: eventId,
             actorId: viewer.sub,
             metadata: {
               fromAssigneeId: visibleTicket.assigneeId,
@@ -770,6 +791,17 @@ export class TicketsService {
       },
       include: ticketDetailInclude,
     });
+
+    if (input.assigneeId !== null && input.assigneeId !== viewer.sub) {
+      await this.produceAssignmentNotification({
+        actorId: viewer.sub,
+        eventId,
+        eventType,
+        newAssigneeId: input.assigneeId,
+        ticketId: updated.id,
+        ticketNumber: updated.number,
+      });
+    }
 
     return TicketDetailDto.fromRecord(updated);
   }
@@ -799,6 +831,7 @@ export class TicketsService {
       );
     }
 
+    const eventId = randomUUID();
     const updated = await this.prisma.ticket.update({
       where: {
         id: visibleTicket.id,
@@ -807,6 +840,7 @@ export class TicketsService {
         status: input.status,
         events: {
           create: {
+            id: eventId,
             actorId: viewer.sub,
             metadata: {
               fromStatus,
@@ -817,6 +851,17 @@ export class TicketsService {
         },
       },
       include: ticketDetailInclude,
+    });
+
+    await this.produceStatusChangeNotification({
+      actorId: viewer.sub,
+      assigneeId: updated.assigneeId,
+      eventId,
+      fromStatus,
+      requesterId: updated.requesterId,
+      ticketId: updated.id,
+      ticketNumber: updated.number,
+      toStatus: input.status,
     });
 
     return TicketDetailDto.fromRecord(updated);
@@ -1223,6 +1268,194 @@ export class TicketsService {
     }
 
     return TicketDetailDto.fromRecord(ticket);
+  }
+
+  private async produceReplyNotification(
+    ticketId: string,
+    actorId: string,
+    messageId: string,
+  ): Promise<void> {
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: {
+        number: true,
+        requesterId: true,
+        assigneeId: true,
+      },
+    });
+
+    if (!ticket) return;
+
+    const recipients = this.uniqueExcludingActor(
+      [ticket.requesterId, ticket.assigneeId],
+      actorId,
+    );
+
+    if (recipients.length === 0) return;
+
+    await this.safeEnqueue(
+      {
+        message: `A new public reply was added to ticket #${ticket.number}.`,
+        recipientUserIds: recipients,
+        source: {
+          actorId,
+          eventType: 'REPLIED',
+        },
+        ticketId,
+        type: NotificationType.TICKET_REPLIED,
+      },
+      messageId,
+    );
+  }
+
+  private async produceInternalNoteNotification(
+    ticketId: string,
+    actorId: string,
+    messageId: string,
+  ): Promise<void> {
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: {
+        number: true,
+        assigneeId: true,
+        teamId: true,
+      },
+    });
+
+    if (!ticket) return;
+
+    const candidateIds: string[] = [];
+    if (ticket.assigneeId !== null) {
+      candidateIds.push(ticket.assigneeId);
+    }
+    if (ticket.teamId !== null) {
+      const teamMembers = await this.prisma.teamMember.findMany({
+        where: { teamId: ticket.teamId },
+        select: { userId: true },
+      });
+      for (const member of teamMembers) {
+        candidateIds.push(member.userId);
+      }
+    }
+
+    const uniqueCandidates = this.uniqueExcludingActor(candidateIds, actorId);
+
+    if (uniqueCandidates.length === 0) return;
+
+    const staffUsers = await this.prisma.user.findMany({
+      where: {
+        id: { in: uniqueCandidates },
+      },
+      include: {
+        role: true,
+      },
+    });
+
+    const recipients = staffUsers
+      .filter((user) => user.role.name !== RoleName.CUSTOMER)
+      .map((user) => user.id);
+
+    if (recipients.length === 0) return;
+
+    await this.safeEnqueue(
+      {
+        message: `An internal note was added to ticket #${ticket.number}.`,
+        recipientUserIds: recipients,
+        source: {
+          actorId,
+          eventType: 'NOTE_ADDED',
+        },
+        ticketId,
+        type: NotificationType.NOTE_ADDED,
+      },
+      messageId,
+    );
+  }
+
+  private async produceAssignmentNotification(input: {
+    actorId: string;
+    eventId: string;
+    eventType: TicketEventType;
+    newAssigneeId: string;
+    ticketId: string;
+    ticketNumber: number;
+  }): Promise<void> {
+    await this.safeEnqueue(
+      {
+        message: `Ticket #${input.ticketNumber} was assigned to you.`,
+        recipientUserIds: [input.newAssigneeId],
+        source: {
+          actorId: input.actorId,
+          eventId: input.eventId,
+          eventType: input.eventType,
+        },
+        ticketId: input.ticketId,
+        type: NotificationType.TICKET_ASSIGNED,
+      },
+      input.eventId,
+    );
+  }
+
+  private async produceStatusChangeNotification(input: {
+    actorId: string;
+    assigneeId: string | null;
+    eventId: string;
+    fromStatus: TicketStatus;
+    requesterId: string;
+    ticketId: string;
+    ticketNumber: number;
+    toStatus: TicketStatus;
+  }): Promise<void> {
+    const recipients = this.uniqueExcludingActor(
+      [input.requesterId, input.assigneeId],
+      input.actorId,
+    );
+
+    if (recipients.length === 0) return;
+
+    await this.safeEnqueue(
+      {
+        message: `Ticket #${input.ticketNumber} status changed to ${input.toStatus}.`,
+        recipientUserIds: recipients,
+        source: {
+          actorId: input.actorId,
+          eventId: input.eventId,
+          eventType: 'STATUS_CHANGED',
+        },
+        ticketId: input.ticketId,
+        type: NotificationType.STATUS_CHANGED,
+      },
+      input.eventId,
+    );
+  }
+
+  private uniqueExcludingActor(
+    candidateIds: ReadonlyArray<string | null | undefined>,
+    actorId: string,
+  ): string[] {
+    return [
+      ...new Set(
+        candidateIds.filter(
+          (id): id is string =>
+            typeof id === 'string' && id.length > 0 && id !== actorId,
+        ),
+      ),
+    ];
+  }
+
+  private async safeEnqueue(
+    payload: NotificationJobPayload,
+    jobId?: string,
+  ): Promise<void> {
+    try {
+      await this.queueService.enqueueNotification(payload, jobId);
+    } catch (error) {
+      this.logger.warn({
+        event: 'notification.enqueue_failed_at_producer',
+        error: error instanceof Error ? error.message : String(error),
+        notificationType: payload.type,
+      });
+    }
   }
 
   private async findVisibleTicketForMutation(
