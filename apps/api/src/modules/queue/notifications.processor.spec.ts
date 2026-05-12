@@ -1,10 +1,13 @@
 import 'reflect-metadata';
 
 import { NotificationType } from '@prisma/client';
+import type { Notification } from '@prisma/client';
 import type { Job } from 'bullmq';
+import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { NotificationsService } from '../notifications/notifications.service';
+import type { RealtimeService } from '../realtime/realtime.service';
 import { NotificationsProcessor } from './notifications.processor';
 import {
   NOTIFICATIONS_JOB_NAME,
@@ -21,16 +24,36 @@ const buildJob = (
     name: overrides.name ?? NOTIFICATIONS_JOB_NAME,
   }) as unknown as Job<NotificationJobPayload>;
 
+const buildRow = (
+  overrides: Partial<Notification> & Pick<Notification, 'userId'>,
+): Notification => ({
+  createdAt: overrides.createdAt ?? new Date(),
+  id: overrides.id ?? randomUUID(),
+  isRead: overrides.isRead ?? false,
+  message: overrides.message ?? 'msg',
+  ticketId: overrides.ticketId ?? null,
+  type: overrides.type ?? NotificationType.TICKET_REPLIED,
+  userId: overrides.userId,
+});
+
 describe('NotificationsProcessor', () => {
   let createForRecipients: ReturnType<typeof vi.fn>;
+  let emitNotificationCreated: ReturnType<typeof vi.fn>;
   let processor: NotificationsProcessor;
 
   beforeEach(() => {
-    createForRecipients = vi.fn().mockResolvedValue(2);
+    createForRecipients = vi.fn().mockResolvedValue([]);
+    emitNotificationCreated = vi.fn();
     const notificationsService = {
       createForRecipients,
     } as unknown as NotificationsService;
-    processor = new NotificationsProcessor(notificationsService);
+    const realtimeService = {
+      emitNotificationCreated,
+    } as unknown as RealtimeService;
+    processor = new NotificationsProcessor(
+      notificationsService,
+      realtimeService,
+    );
   });
 
   it('invokes NotificationsService.createForRecipients with the job payload', async () => {
@@ -68,6 +91,34 @@ describe('NotificationsProcessor', () => {
     );
   });
 
+  it('emits notification.created per created row to the recipient room', async () => {
+    const recipientOne = '00000000-0000-4000-8000-000000000001';
+    const recipientTwo = '00000000-0000-4000-8000-000000000002';
+    const rowOne = buildRow({ userId: recipientOne });
+    const rowTwo = buildRow({ userId: recipientTwo });
+    createForRecipients.mockResolvedValueOnce([rowOne, rowTwo]);
+
+    await processor.process(
+      buildJob({
+        message: 'm',
+        recipientUserIds: [recipientOne, recipientTwo],
+        type: NotificationType.TICKET_REPLIED,
+      }),
+    );
+
+    expect(emitNotificationCreated).toHaveBeenCalledTimes(2);
+    expect(emitNotificationCreated).toHaveBeenNthCalledWith(
+      1,
+      recipientOne,
+      expect.objectContaining({ id: rowOne.id }),
+    );
+    expect(emitNotificationCreated).toHaveBeenNthCalledWith(
+      2,
+      recipientTwo,
+      expect.objectContaining({ id: rowTwo.id }),
+    );
+  });
+
   it('skips malformed payloads without throwing or calling the service', async () => {
     await expect(
       processor.process(buildJob(undefined as unknown)),
@@ -87,6 +138,7 @@ describe('NotificationsProcessor', () => {
     ).resolves.toBeUndefined();
 
     expect(createForRecipients).not.toHaveBeenCalled();
+    expect(emitNotificationCreated).not.toHaveBeenCalled();
   });
 
   it('propagates service failures so BullMQ can apply its retry policy', async () => {
@@ -102,5 +154,7 @@ describe('NotificationsProcessor', () => {
         }),
       ),
     ).rejects.toThrow('DB unavailable');
+
+    expect(emitNotificationCreated).not.toHaveBeenCalled();
   });
 });

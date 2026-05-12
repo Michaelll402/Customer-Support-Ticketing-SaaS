@@ -3,6 +3,7 @@ import { Module, type DynamicModule, type Provider } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { NotificationsModule } from '../notifications/notifications.module';
+import { RealtimeModule } from '../realtime/realtime.module';
 import { NotificationsProcessor } from './notifications.processor';
 import { NOTIFICATIONS_QUEUE_NAME } from './queue.constants';
 import { QueueService } from './queue.service';
@@ -31,7 +32,7 @@ const queueProviders: Provider[] = isTestEnv
   : [QueueService, NotificationsProcessor];
 
 @Module({
-  imports: [...queueImports, NotificationsModule],
+  imports: [...queueImports, NotificationsModule, RealtimeModule],
   providers: queueProviders,
   exports: [QueueService],
 })

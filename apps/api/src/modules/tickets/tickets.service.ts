@@ -22,6 +22,7 @@ import { randomUUID } from 'node:crypto';
 import type { AccessTokenPayload } from '../auth/auth.types';
 import { QueueService } from '../queue/queue.service';
 import type { NotificationJobPayload } from '../queue/queue.constants';
+import { RealtimeService } from '../realtime/realtime.service';
 import { StorageService } from '../storage/storage.service';
 import { PrismaService } from '../../common/database/prisma.service';
 import type { AssignTicketDto } from './dto/assign-ticket.dto';
@@ -213,6 +214,7 @@ export class TicketsService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(StorageService) private readonly storage: StorageService,
     @Inject(QueueService) private readonly queueService: QueueService,
+    @Inject(RealtimeService) private readonly realtimeService: RealtimeService,
   ) {}
 
   async listTicketCategories(): Promise<TicketCategoryOptionDto[]> {
@@ -492,6 +494,22 @@ export class TicketsService {
       message.id,
     );
 
+    try {
+      this.realtimeService.emitTicketMessageCreatedPublic(visibleTicket.id, {
+        authorId: message.authorId,
+        createdAt: message.createdAt,
+        id: message.id,
+        isInternal: false,
+        ticketId: visibleTicket.id,
+      });
+    } catch (error) {
+      this.logger.warn({
+        event: 'realtime.emit_failed_at_producer',
+        error: error instanceof Error ? error.message : String(error),
+        wsEvent: 'ticket.message.created.public',
+      });
+    }
+
     return TicketMessageDto.fromRecord(message);
   }
 
@@ -523,6 +541,22 @@ export class TicketsService {
       viewer.sub,
       message.id,
     );
+
+    try {
+      this.realtimeService.emitTicketMessageCreatedInternal(visibleTicket.id, {
+        authorId: message.authorId,
+        createdAt: message.createdAt,
+        id: message.id,
+        isInternal: true,
+        ticketId: visibleTicket.id,
+      });
+    } catch (error) {
+      this.logger.warn({
+        event: 'realtime.emit_failed_at_producer',
+        error: error instanceof Error ? error.message : String(error),
+        wsEvent: 'ticket.message.created.internal',
+      });
+    }
 
     return TicketMessageDto.fromRecord(message);
   }
@@ -803,7 +837,9 @@ export class TicketsService {
       });
     }
 
-    return TicketDetailDto.fromRecord(updated);
+    const dto = TicketDetailDto.fromRecord(updated);
+    this.emitTicketUpdatedFromDto(dto);
+    return dto;
   }
 
   async updateTicketStatus(
@@ -864,7 +900,9 @@ export class TicketsService {
       toStatus: input.status,
     });
 
-    return TicketDetailDto.fromRecord(updated);
+    const dto = TicketDetailDto.fromRecord(updated);
+    this.emitTicketUpdatedFromDto(dto);
+    return dto;
   }
 
   async updateTicketPriority(
@@ -903,7 +941,9 @@ export class TicketsService {
       include: ticketDetailInclude,
     });
 
-    return TicketDetailDto.fromRecord(updated);
+    const dto = TicketDetailDto.fromRecord(updated);
+    this.emitTicketUpdatedFromDto(dto);
+    return dto;
   }
 
   async updateTicketTags(
@@ -993,7 +1033,9 @@ export class TicketsService {
       });
     });
 
-    return this.loadTicketDetail(ticketId);
+    const dto = await this.loadTicketDetail(ticketId);
+    this.emitTicketUpdatedFromDto(dto);
+    return dto;
   }
 
   async updateTicketCategory(
@@ -1047,7 +1089,9 @@ export class TicketsService {
       include: ticketDetailInclude,
     });
 
-    return TicketDetailDto.fromRecord(updated);
+    const dto = TicketDetailDto.fromRecord(updated);
+    this.emitTicketUpdatedFromDto(dto);
+    return dto;
   }
 
   async transferTicketTeam(
@@ -1153,7 +1197,9 @@ export class TicketsService {
       }
     });
 
-    return this.loadTicketDetail(ticketId);
+    const dto = await this.loadTicketDetail(ticketId);
+    this.emitTicketUpdatedFromDto(dto);
+    return dto;
   }
 
   async listTicketTags(): Promise<TicketTagOptionDto[]> {
@@ -1213,6 +1259,28 @@ export class TicketsService {
       throw new ForbiddenException(
         'Only staff users can perform this workflow action.',
       );
+    }
+  }
+
+  private emitTicketUpdatedFromDto(dto: TicketDetailDto): void {
+    try {
+      this.realtimeService.emitTicketUpdated(dto.id, {
+        assigneeId: dto.assignee?.id ?? null,
+        categoryId: dto.category?.id ?? null,
+        id: dto.id,
+        number: dto.number,
+        priority: dto.priority,
+        status: dto.status,
+        tagIds: dto.tags.map((tag) => tag.id),
+        teamId: dto.team?.id ?? null,
+        updatedAt: dto.updatedAt,
+      });
+    } catch (error) {
+      this.logger.warn({
+        event: 'realtime.emit_failed_at_producer',
+        error: error instanceof Error ? error.message : String(error),
+        wsEvent: 'ticket.updated',
+      });
     }
   }
 

@@ -188,6 +188,23 @@ const createPrismaMock = () => {
       }
       return { count: data.length };
     }),
+    createManyAndReturn: vi.fn(async ({ data }: NotificationCreateManyArgs) => {
+      const created: StoredNotification[] = [];
+      for (const entry of data) {
+        const row: StoredNotification = {
+          createdAt: new Date(),
+          id: randomUUID(),
+          isRead: false,
+          message: entry.message,
+          ticketId: entry.ticketId,
+          type: entry.type,
+          userId: entry.userId,
+        };
+        notifications.push(row);
+        created.push(row);
+      }
+      return created;
+    }),
   };
 
   const userModel = {
@@ -616,13 +633,13 @@ describe('Notifications integration', () => {
 
   it('deduplicates recipient IDs in NotificationsService.createForRecipients', async () => {
     const service = app.get(NotificationsService);
-    const count = await service.createForRecipients({
+    const rows = await service.createForRecipients({
       message: 'Hello',
       recipientUserIds: [primaryUserId, primaryUserId, secondaryUserId],
       type: NotificationType.TICKET_REPLIED,
     });
 
-    expect(count).toBe(2);
+    expect(rows).toHaveLength(2);
     expect(prismaMock.notificationStore).toHaveLength(2);
     const userIds = prismaMock.notificationStore.map((entry) => entry.userId);
     expect(userIds.sort()).toEqual([primaryUserId, secondaryUserId].sort());
@@ -632,23 +649,27 @@ describe('Notifications integration', () => {
     const service = app.get(NotificationsService);
 
     expect(
-      await service.createForRecipients({
-        message: 'Hello',
-        recipientUserIds: [],
-        type: NotificationType.TICKET_REPLIED,
-      }),
+      (
+        await service.createForRecipients({
+          message: 'Hello',
+          recipientUserIds: [],
+          type: NotificationType.TICKET_REPLIED,
+        })
+      ).length,
     ).toBe(0);
 
     expect(
-      await service.createForRecipients({
-        message: 'Hello',
-        recipientUserIds: ['', ''],
-        type: NotificationType.TICKET_REPLIED,
-      }),
+      (
+        await service.createForRecipients({
+          message: 'Hello',
+          recipientUserIds: ['', ''],
+          type: NotificationType.TICKET_REPLIED,
+        })
+      ).length,
     ).toBe(0);
 
     expect(prismaMock.notificationStore).toHaveLength(0);
-    expect(prismaMock.notification.createMany).not.toHaveBeenCalled();
+    expect(prismaMock.notification.createManyAndReturn).not.toHaveBeenCalled();
   });
 
   it('uses notification.update only when the row is currently unread', async () => {

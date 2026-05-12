@@ -21,6 +21,7 @@ import { validateApiEnv } from '../../common/config/env.validation';
 import { validationPipeOptions } from '../../common/validation/validation.pipe-options';
 import { AuthModule } from '../auth/auth.module';
 import { QueueService } from '../queue/queue.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import { StorageService } from '../storage/storage.service';
 import { TicketsModule } from './tickets.module';
 
@@ -1285,6 +1286,12 @@ describe('Tickets integration', () => {
   let queueMock: {
     enqueueNotification: ReturnType<typeof vi.fn>;
   };
+  let realtimeMock: {
+    emitNotificationCreated: ReturnType<typeof vi.fn>;
+    emitTicketUpdated: ReturnType<typeof vi.fn>;
+    emitTicketMessageCreatedPublic: ReturnType<typeof vi.fn>;
+    emitTicketMessageCreatedInternal: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(async () => {
     originalEnv = { ...process.env };
@@ -1318,6 +1325,12 @@ describe('Tickets integration', () => {
     };
     queueMock = {
       enqueueNotification: vi.fn().mockResolvedValue(undefined),
+    };
+    realtimeMock = {
+      emitNotificationCreated: vi.fn(),
+      emitTicketUpdated: vi.fn(),
+      emitTicketMessageCreatedPublic: vi.fn(),
+      emitTicketMessageCreatedInternal: vi.fn(),
     };
 
     const technicalTeam: StoredTeam = {
@@ -1657,6 +1670,8 @@ describe('Tickets integration', () => {
       .useValue(storageMock)
       .overrideProvider(QueueService)
       .useValue(queueMock)
+      .overrideProvider(RealtimeService)
+      .useValue(realtimeMock)
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -4631,6 +4646,118 @@ describe('Tickets integration', () => {
         (event) =>
           event.ticketId === ticket.id &&
           event.type === TicketEventType.ASSIGNED,
+      ),
+    ).toBeDefined();
+  });
+
+  // BE-04 slice D — realtime emit producers
+
+  it('emits ticket.message.created.public after a public reply commits', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .post(`/tickets/${ticket.id}/replies`)
+      .send({ body: 'Public update.' })
+      .expect(201);
+
+    expect(realtimeMock.emitTicketMessageCreatedPublic).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(
+      realtimeMock.emitTicketMessageCreatedInternal,
+    ).not.toHaveBeenCalled();
+    const [ticketId, payload] =
+      realtimeMock.emitTicketMessageCreatedPublic.mock.calls[0]!;
+    expect(ticketId).toBe(ticket.id);
+    expect(payload).toMatchObject({ isInternal: false, ticketId: ticket.id });
+  });
+
+  it('emits ticket.message.created.internal only after an internal note', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Team queue ticket',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .post(`/tickets/${ticket.id}/internal-notes`)
+      .send({ body: 'Staff-only context.' })
+      .expect(201);
+
+    expect(realtimeMock.emitTicketMessageCreatedInternal).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(realtimeMock.emitTicketMessageCreatedPublic).not.toHaveBeenCalled();
+    const [ticketId, payload] =
+      realtimeMock.emitTicketMessageCreatedInternal.mock.calls[0]!;
+    expect(ticketId).toBe(ticket.id);
+    expect(payload).toMatchObject({ isInternal: true, ticketId: ticket.id });
+  });
+
+  it('emits ticket.updated with a shallow projection after a workflow PATCH', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .patch(`/tickets/${ticket.id}/status`)
+      .send({ status: TicketStatus.RESOLVED })
+      .expect(200);
+
+    expect(realtimeMock.emitTicketUpdated).toHaveBeenCalledTimes(1);
+    const [emittedTicketId, payload] =
+      realtimeMock.emitTicketUpdated.mock.calls[0]!;
+    expect(emittedTicketId).toBe(ticket.id);
+    expect(payload).toMatchObject({
+      id: ticket.id,
+      status: TicketStatus.RESOLVED,
+    });
+    expect(payload).toHaveProperty('tagIds');
+    expect(payload).toHaveProperty('updatedAt');
+  });
+
+  it('still returns 200 when RealtimeService.emitTicketUpdated throws', async () => {
+    realtimeMock.emitTicketUpdated.mockImplementationOnce(() => {
+      throw new Error('Realtime unavailable');
+    });
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .patch(`/tickets/${ticket.id}/priority`)
+      .send({ priority: TicketPriority.LOW })
+      .expect(200);
+
+    expect(
+      prismaMock.ticketEventStore.find(
+        (event) =>
+          event.ticketId === ticket.id &&
+          event.type === TicketEventType.PRIORITY_CHANGED,
       ),
     ).toBeDefined();
   });

@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import type { NotificationType, Prisma } from '@prisma/client';
+import type { Notification, NotificationType, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../common/database/prisma.service';
 import type { MarkAllNotificationsReadResponseDto } from './dto/mark-all-notifications-read-response.dto';
@@ -110,7 +110,9 @@ export class NotificationsService {
     };
   }
 
-  async createForRecipients(input: CreateNotificationsInput): Promise<number> {
+  async createForRecipients(
+    input: CreateNotificationsInput,
+  ): Promise<Notification[]> {
     const uniqueRecipients = [
       ...new Set(
         input.recipientUserIds.filter(
@@ -120,10 +122,10 @@ export class NotificationsService {
     ];
 
     if (uniqueRecipients.length === 0) {
-      return 0;
+      return [];
     }
 
-    const result = await this.prisma.notification.createMany({
+    const rows = await this.prisma.notification.createManyAndReturn({
       data: uniqueRecipients.map((userId) => ({
         message: input.message,
         ticketId: input.ticketId ?? null,
@@ -132,6 +134,6 @@ export class NotificationsService {
       })),
     });
 
-    return result.count;
+    return rows;
   }
 }

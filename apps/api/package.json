@@ -24,7 +24,9 @@
     "@nestjs/jwt": "10.2.0",
     "@nestjs/passport": "10.0.3",
     "@nestjs/platform-express": "^10.4.15",
+    "@nestjs/platform-socket.io": "^10.4.15",
     "@nestjs/swagger": "^7.4.2",
+    "@nestjs/websockets": "^10.4.15",
     "@prisma/client": "^6.5.0",
     "bcryptjs": "2.4.3",
     "bullmq": "^5.34.10",
@@ -36,6 +38,7 @@
     "pino-pretty": "^11.3.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "socket.io": "^4.8.1",
     "swagger-ui-express": "^5.0.1",
     "zod": "^3.24.1"
   },
@@ -48,6 +51,7 @@
     "@types/passport-jwt": "^4.0.1",
     "@types/supertest": "^7.2.0",
     "prisma": "^6.5.0",
+    "socket.io-client": "^4.8.1",
     "supertest": "^7.2.2",
     "tsx": "^4.19.2",
     "vitest": "^2.1.8"

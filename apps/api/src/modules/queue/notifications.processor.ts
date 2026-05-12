@@ -3,6 +3,7 @@ import { Inject, Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
 
 import { NotificationsService } from '../notifications/notifications.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import {
   NOTIFICATIONS_QUEUE_NAME,
   type NotificationJobPayload,
@@ -15,6 +16,8 @@ export class NotificationsProcessor extends WorkerHost {
   constructor(
     @Inject(NotificationsService)
     private readonly notificationsService: NotificationsService,
+    @Inject(RealtimeService)
+    private readonly realtimeService: RealtimeService,
   ) {
     super();
   }
@@ -44,9 +47,20 @@ export class NotificationsProcessor extends WorkerHost {
         type: payload.type,
       });
 
+      for (const row of created) {
+        this.realtimeService.emitNotificationCreated(row.userId, {
+          createdAt: row.createdAt,
+          id: row.id,
+          isRead: row.isRead,
+          message: row.message,
+          ticketId: row.ticketId,
+          type: row.type,
+        });
+      }
+
       this.logger.debug({
         event: 'notification.job_processed',
-        createdCount: created,
+        createdCount: created.length,
         jobId: job.id,
         notificationType: payload.type,
       });

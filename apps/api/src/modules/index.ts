@@ -4,6 +4,7 @@ export * from './audit';
 export * from './auth';
 export * from './notifications';
 export * from './queue';
+export * from './realtime';
 export * from './sla';
 export * from './storage';
 export * from './tickets';
