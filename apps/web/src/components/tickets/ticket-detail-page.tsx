@@ -38,6 +38,8 @@ import {
   type TicketTimelineSystemEventItem,
 } from '@/lib/tickets';
 
+import { TicketWorkflowPanel } from './ticket-workflow-panel';
+
 const statusToneClasses: Record<TicketStatus, string> = {
   CLOSED: 'bg-slate-200 text-slate-700',
   OPEN: 'bg-emerald-100 text-emerald-800',
@@ -1141,6 +1143,10 @@ export const TicketDetailPage = ({ ticketId }: { ticketId: string }) => {
 
       <TicketDescription ticket={ticket} />
       <TicketMetadata ticket={ticket} />
+      <TicketWorkflowPanel
+        currentUserRole={currentUserQuery.data?.role ?? null}
+        ticket={ticket}
+      />
       <TicketComposers
         currentUserRole={currentUserQuery.data?.role ?? null}
         ticket={ticket}

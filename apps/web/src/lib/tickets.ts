@@ -577,6 +577,219 @@ export const createTicketInternalNote = async (
   return ticketMessageResponseSchema.parse(response);
 };
 
+export const allowedStaffStatusTransitions: Record<
+  TicketStatus,
+  ReadonlyArray<TicketStatus>
+> = {
+  OPEN: ['PENDING', 'RESOLVED', 'CLOSED'],
+  PENDING: ['OPEN', 'RESOLVED', 'CLOSED'],
+  RESOLVED: ['OPEN', 'CLOSED'],
+  CLOSED: ['OPEN'],
+};
+
+export const ticketTagOptionSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  color: z.string().nullable(),
+});
+
+export type TicketTagOption = z.infer<typeof ticketTagOptionSchema>;
+
+export const ticketTagListResponseSchema = z.array(ticketTagOptionSchema);
+
+export const ticketTeamOptionSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().nullable(),
+});
+
+export type TicketTeamOption = z.infer<typeof ticketTeamOptionSchema>;
+
+export const ticketTeamListResponseSchema = z.array(ticketTeamOptionSchema);
+
+export const assignableUserSchema = z.object({
+  id: z.string().min(1),
+  email: z.string().email(),
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+  role: z.enum(['AGENT', 'MANAGER', 'ADMIN']),
+});
+
+export type AssignableUser = z.infer<typeof assignableUserSchema>;
+
+export const assignableUserListResponseSchema = z.array(assignableUserSchema);
+
+export interface UpdateTicketStatusInput {
+  status: TicketStatus;
+}
+
+export interface UpdateTicketPriorityInput {
+  priority: TicketPriority;
+}
+
+export interface AssignTicketInput {
+  assigneeId: string | null;
+}
+
+export interface UpdateTicketTagsInput {
+  tagIds: string[];
+}
+
+export interface UpdateTicketCategoryInput {
+  categoryId: string | null;
+}
+
+export interface TransferTicketTeamInput {
+  teamId: string;
+}
+
+export const getTicketTags = async () => {
+  const response = await apiRequest<TicketTagOption[]>('/tickets/tags', {
+    cache: 'no-store',
+  });
+
+  return ticketTagListResponseSchema.parse(response);
+};
+
+export const getTicketTeams = async () => {
+  const response = await apiRequest<TicketTeamOption[]>('/tickets/teams', {
+    cache: 'no-store',
+  });
+
+  return ticketTeamListResponseSchema.parse(response);
+};
+
+export const getAssignableUsers = async (ticketId: string) => {
+  const response = await apiRequest<AssignableUser[]>(
+    `/tickets/${ticketId}/assignable-users`,
+    {
+      cache: 'no-store',
+    },
+  );
+
+  return assignableUserListResponseSchema.parse(response);
+};
+
+export const updateTicketStatus = async (
+  ticketId: string,
+  input: UpdateTicketStatusInput,
+) => {
+  const response = await apiRequest<TicketDetailResponse>(
+    `/tickets/${ticketId}/status`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+      cache: 'no-store',
+    },
+  );
+
+  return ticketDetailResponseSchema.parse(response);
+};
+
+export const updateTicketPriority = async (
+  ticketId: string,
+  input: UpdateTicketPriorityInput,
+) => {
+  const response = await apiRequest<TicketDetailResponse>(
+    `/tickets/${ticketId}/priority`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+      cache: 'no-store',
+    },
+  );
+
+  return ticketDetailResponseSchema.parse(response);
+};
+
+export const assignTicket = async (
+  ticketId: string,
+  input: AssignTicketInput,
+) => {
+  const response = await apiRequest<TicketDetailResponse>(
+    `/tickets/${ticketId}/assign`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+      cache: 'no-store',
+    },
+  );
+
+  return ticketDetailResponseSchema.parse(response);
+};
+
+export const updateTicketTags = async (
+  ticketId: string,
+  input: UpdateTicketTagsInput,
+) => {
+  const response = await apiRequest<TicketDetailResponse>(
+    `/tickets/${ticketId}/tags`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+      cache: 'no-store',
+    },
+  );
+
+  return ticketDetailResponseSchema.parse(response);
+};
+
+export const updateTicketCategory = async (
+  ticketId: string,
+  input: UpdateTicketCategoryInput,
+) => {
+  const response = await apiRequest<TicketDetailResponse>(
+    `/tickets/${ticketId}/category`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+      cache: 'no-store',
+    },
+  );
+
+  return ticketDetailResponseSchema.parse(response);
+};
+
+export const transferTicketTeam = async (
+  ticketId: string,
+  input: TransferTicketTeamInput,
+) => {
+  const response = await apiRequest<TicketDetailResponse>(
+    `/tickets/${ticketId}/team`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+      cache: 'no-store',
+    },
+  );
+
+  return ticketDetailResponseSchema.parse(response);
+};
+
+export const userRoleLabels: Record<AssignableUser['role'], string> = {
+  ADMIN: 'Admin',
+  AGENT: 'Agent',
+  MANAGER: 'Manager',
+};
+
 export const ticketStatusLabels: Record<TicketStatus, string> = {
   OPEN: 'Open',
   PENDING: 'Pending',

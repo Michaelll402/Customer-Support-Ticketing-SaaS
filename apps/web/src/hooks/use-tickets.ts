@@ -8,24 +8,44 @@ import {
 } from '@tanstack/react-query';
 
 import {
+  assignTicket,
   createTicket,
   createTicketInternalNote,
   createTicketPublicReply,
+  getAssignableUsers,
   getTicketAttachmentDownloadUrl,
   getTicketCategories,
   getTicketById,
+  getTicketTags,
+  getTicketTeams,
   getTicketTimeline,
   getTickets,
+  transferTicketTeam,
+  updateTicketCategory,
+  updateTicketPriority,
+  updateTicketStatus,
+  updateTicketTags,
   uploadTicketAttachment,
+  type AssignTicketInput,
+  type AssignableUser,
   type CreateTicketMessageInput,
   type CreateTicketInput,
   type TicketAttachmentDownloadUrlResponse,
   type TicketCategoryOption,
   type TicketDetailResponse,
   type TicketListQuery,
+  type TicketTagOption,
+  type TicketTeamOption,
   type TicketTimelineAttachment,
   type TicketTimelineResponse,
+  type TransferTicketTeamInput,
+  type UpdateTicketCategoryInput,
+  type UpdateTicketPriorityInput,
+  type UpdateTicketStatusInput,
+  type UpdateTicketTagsInput,
 } from '@/lib/tickets';
+
+import type { QueryClient } from '@tanstack/react-query';
 
 export const useTickets = (query: TicketListQuery) =>
   useQuery({
@@ -53,6 +73,27 @@ export const useTicketCategories = (enabled = true) =>
     enabled,
     queryKey: ['tickets', 'categories'],
     queryFn: () => getTicketCategories(),
+  });
+
+export const useTicketTags = (enabled = true) =>
+  useQuery<TicketTagOption[]>({
+    enabled,
+    queryKey: ['tickets', 'tags'],
+    queryFn: () => getTicketTags(),
+  });
+
+export const useTicketTeams = (enabled = true) =>
+  useQuery<TicketTeamOption[]>({
+    enabled,
+    queryKey: ['tickets', 'teams'],
+    queryFn: () => getTicketTeams(),
+  });
+
+export const useAssignableUsers = (ticketId: string, enabled = true) =>
+  useQuery<AssignableUser[]>({
+    enabled: enabled && ticketId.length > 0,
+    queryKey: ['tickets', 'assignable-users', ticketId],
+    queryFn: () => getAssignableUsers(ticketId),
   });
 
 export const useCreateTicket = () => {
@@ -106,3 +147,77 @@ export const useTicketAttachmentDownloadUrl = (ticketId: string) =>
     mutationFn: (attachmentId) =>
       getTicketAttachmentDownloadUrl(ticketId, attachmentId),
   });
+
+const invalidateTicketWorkflowCaches = async (
+  queryClient: QueryClient,
+  ticketId: string,
+) => {
+  await Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: ['tickets', 'detail', ticketId],
+    }),
+    queryClient.invalidateQueries({ queryKey: ['tickets', 'list'] }),
+    queryClient.invalidateQueries({
+      queryKey: ['tickets', 'timeline', ticketId],
+    }),
+  ]);
+};
+
+export const useUpdateTicketStatus = (ticketId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: UpdateTicketStatusInput) =>
+      updateTicketStatus(ticketId, input),
+    onSuccess: () => invalidateTicketWorkflowCaches(queryClient, ticketId),
+  });
+};
+
+export const useUpdateTicketPriority = (ticketId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: UpdateTicketPriorityInput) =>
+      updateTicketPriority(ticketId, input),
+    onSuccess: () => invalidateTicketWorkflowCaches(queryClient, ticketId),
+  });
+};
+
+export const useAssignTicket = (ticketId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: AssignTicketInput) => assignTicket(ticketId, input),
+    onSuccess: () => invalidateTicketWorkflowCaches(queryClient, ticketId),
+  });
+};
+
+export const useUpdateTicketTags = (ticketId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: UpdateTicketTagsInput) =>
+      updateTicketTags(ticketId, input),
+    onSuccess: () => invalidateTicketWorkflowCaches(queryClient, ticketId),
+  });
+};
+
+export const useUpdateTicketCategory = (ticketId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: UpdateTicketCategoryInput) =>
+      updateTicketCategory(ticketId, input),
+    onSuccess: () => invalidateTicketWorkflowCaches(queryClient, ticketId),
+  });
+};
+
+export const useTransferTicketTeam = (ticketId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: TransferTicketTeamInput) =>
+      transferTicketTeam(ticketId, input),
+    onSuccess: () => invalidateTicketWorkflowCaches(queryClient, ticketId),
+  });
+};
