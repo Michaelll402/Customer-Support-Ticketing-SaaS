@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 
 import { QueryProvider } from '@/providers/query-provider';
+import { RealtimeProvider } from '@/providers/realtime-provider';
 import { webEnv } from '@/lib/env';
 
 import './globals.css';
@@ -20,7 +21,9 @@ const RootLayout = ({ children }: RootLayoutProps) => {
   return (
     <html lang="en">
       <body>
-        <QueryProvider>{children}</QueryProvider>
+        <QueryProvider>
+          <RealtimeProvider>{children}</RealtimeProvider>
+        </QueryProvider>
       </body>
     </html>
   );

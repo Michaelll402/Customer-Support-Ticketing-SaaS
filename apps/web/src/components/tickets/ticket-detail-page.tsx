@@ -11,6 +11,7 @@ import {
 import Link from 'next/link';
 
 import { useCurrentUser } from '@/hooks/use-auth';
+import { useTicketRealtimeSubscription } from '@/hooks/use-realtime';
 import {
   useCreateTicketInternalNote,
   useCreateTicketPublicReply,
@@ -1011,6 +1012,13 @@ const TicketTimeline = ({ ticketId }: { ticketId: string }) => {
 export const TicketDetailPage = ({ ticketId }: { ticketId: string }) => {
   const ticketQuery = useTicket(ticketId);
   const currentUserQuery = useCurrentUser();
+
+  const currentUserRole = currentUserQuery.data?.role ?? null;
+  const isStaffViewer = currentUserRole
+    ? staffRoles.has(currentUserRole)
+    : false;
+
+  useTicketRealtimeSubscription(ticketId, { staff: isStaffViewer });
 
   if (ticketQuery.isLoading) {
     return <LoadingState />;

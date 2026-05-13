@@ -11,6 +11,7 @@ import {
   register,
 } from '@/lib/auth';
 import { ApiClientError } from '@/lib/api';
+import { disconnectRealtime } from '@/lib/realtime-controller';
 
 import type { QueryClient } from '@tanstack/react-query';
 
@@ -84,6 +85,7 @@ export const useLogout = () => {
   return useMutation({
     mutationFn: logout,
     onMutate: async () => {
+      disconnectRealtime();
       await queryClient.cancelQueries({ queryKey: authQueryKey });
       await clearRoleSensitiveQueries(queryClient);
     },
