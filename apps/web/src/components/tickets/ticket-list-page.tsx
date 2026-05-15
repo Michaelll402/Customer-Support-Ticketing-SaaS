@@ -329,8 +329,9 @@ export const TicketListPage = () => {
           Nothing matched the current list scope
         </h3>
         <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-slate-600">
-          Adjust filters or reset the query. Ticket detail is now reachable from
-          this list, while conversation and workflow surfaces remain deferred.
+          Adjust filters or reset the query. Ticket detail, conversation,
+          attachments, staff workflow controls, in-app notifications, and
+          realtime updates are reachable from this list.
         </p>
       </div>
     );
@@ -641,8 +642,8 @@ export const TicketListPage = () => {
             </h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">
               Backend pagination and visibility rules control the result set.
-              Ticket detail is live from the list, while conversation and
-              workflow surfaces remain deferred.
+              Ticket detail, conversation, attachments, staff workflow controls,
+              and realtime updates are live from the list.
             </p>
           </div>
 

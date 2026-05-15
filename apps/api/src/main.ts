@@ -39,7 +39,7 @@ const bootstrap = async () => {
     new DocumentBuilder()
       .setTitle('Customer Support Ticketing SaaS API')
       .setDescription(
-        'Customer Support / Ticketing SaaS API. Auth, ticket core, conversation, internal notes, and attachments are implemented. Workflow actions, notifications, realtime, SLA, and dashboards remain deferred.',
+        'Customer Support / Ticketing SaaS API. Auth, ticket core, conversation, internal notes, attachments, workflow actions, in-app notifications, and the Socket.IO realtime gateway are implemented. SLA logic, dashboards, admin CRUD, audit log, email inbox sync, chatbot, and billing remain deferred.',
       )
       .setVersion('0.1.0')
       .addCookieAuth(

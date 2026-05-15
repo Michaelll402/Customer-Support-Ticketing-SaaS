@@ -1,9 +1,13 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: (unversioned template) → 1.1.0
-Bump rationale: MINOR — initial population from project constitution v1.1.0;
-  all sections are net-new content replacing placeholder tokens.
+Version change: (unversioned template) → 1.1.0 → 1.1.1
+Bump rationale:
+  1.1.0 — MINOR: initial population from project constitution v1.1.0;
+    all sections are net-new content replacing placeholder tokens.
+  1.1.1 — PATCH: version stamp aligned to header and footer; clarification
+    and wording-only adjustments. No principle, governance, MVP-scope, or
+    non-negotiable changes.
 
 Modified sections (template token → concrete content):
   [PROJECT_NAME]         → Customer Support / Ticketing SaaS

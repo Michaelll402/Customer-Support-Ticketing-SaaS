@@ -187,7 +187,7 @@ export const AppShell = ({ children }: AppShellProps) => {
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
                   {activeItem?.description ??
-                    'Authenticated workspace routing remains in place, and the ticket list is now live. Deeper workflow slices remain deferred.'}
+                    'Authenticated workspace routing remains in place. Ticket conversations, staff workflow controls, in-app notifications, and realtime updates are live. SLA, dashboards, and admin CRUD remain deferred.'}
                 </p>
               </div>
 

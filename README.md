@@ -11,9 +11,9 @@ This repository is designed as a strong portfolio project rather than a toy CRUD
 - managers monitor operations
 - admins configure the workspace
 
-Current implementation status: **Milestone 3 is complete.**
+Current implementation status: **Milestone 4 is complete.**
 
-Milestone 3 delivers the conversation slice on top of the M2 ticket core: `TicketMessage` and `Attachment` schemas, public replies, staff-only internal notes, multipart attachment uploads to S3-compatible storage, short-lived signed download URLs, a combined ticket timeline, and the frontend composers and attachment UI for all four roles. Notifications, realtime behavior, SLA logic, dashboards, broad workflow controls, and admin CRUD remain deferred.
+Milestone 4 layers operational workflow on top of the M3 conversation slice: staff workflow REST endpoints (assign, status, priority, tags, category, team transfer) and matching read-only options endpoints, an in-app notification REST API, a BullMQ notification queue producer with idempotent job IDs, a Socket.IO realtime gateway with JWT-cookie handshake and per-user/per-ticket/per-staff rooms, a frontend workflow panel on ticket detail, a notification center with bell/dropdown and 30s polling fallback, and a frontend realtime client that turns server events into TanStack Query invalidations. SLA logic, dashboards, admin CRUD/configuration, audit log, email inbox sync, chatbot, and billing remain deferred.
 
 ## Product Positioning
 
@@ -67,7 +67,7 @@ Milestone 3 delivers the conversation slice on top of the M2 ticket core: `Ticke
 - `packages/eslint-config`: shared lint config
 - `packages/tsconfig`: shared TS config
 
-The backend is a modular monolith. Milestone 0 established the repo foundation, Milestone 1 activated lean auth plus the app shell, Milestone 2 activated the ticket-core slice, and Milestone 3 activates the conversation/notes/attachments slice without starting workflow-control milestones.
+The backend is a modular monolith. Milestone 0 established the repo foundation, Milestone 1 activated lean auth plus the app shell, Milestone 2 activated the ticket-core slice, Milestone 3 activated the conversation/notes/attachments slice, and Milestone 4 activated the operational slice: workflow REST actions, in-app notifications via a BullMQ queue, and a Socket.IO realtime gateway with a frontend invalidation client.
 
 ## Current Status
 
@@ -77,28 +77,41 @@ The backend is a modular monolith. Milestone 0 established the repo foundation, 
 - Prisma identity schema with `Role` and `User`
 - Ticket-core schema with `Ticket`, `Team`, `TeamMember`, `Category`, `Tag`, `TicketTag`, and `TicketEvent`
 - Conversation schema with `TicketMessage` (`isInternal` flag) and `Attachment` (with nullable `messageId`, `uploadedById`, `storedKey`, `mimeType`, `sizeBytes`)
-- `TicketEventType` extended with `REPLIED`, `NOTE_ADDED`, `ATTACHMENT_ADDED`
+- `TicketEventType` extended with `REPLIED`, `NOTE_ADDED`, `ATTACHMENT_ADDED`, and `TEAM_TRANSFERRED`
+- `Notification` model and `NotificationType` enum (`TICKET_ASSIGNED`, `TICKET_REPLIED`, `STATUS_CHANGED`, `NOTE_ADDED`, `SLA_AT_RISK`, `SLA_BREACHED`)
 - Seeded roles, demo users, teams, categories, tags, and demo tickets
 - `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`
 - `POST /tickets`, `GET /tickets`, `GET /tickets/categories`, `GET /tickets/:id`, `PATCH /tickets/:id`
-- `POST /tickets/:id/replies` (visible-ticket access, blocks closed tickets)
-- `POST /tickets/:id/internal-notes` (staff only; allowed on closed tickets)
+- `POST /tickets/:id/replies` (visible-ticket access, blocks closed tickets; enqueues `TICKET_REPLIED` notification)
+- `POST /tickets/:id/internal-notes` (staff only; allowed on closed tickets; enqueues `NOTE_ADDED` notification to staff recipients only)
 - `POST /tickets/:id/attachments` (multipart, 10 MB cap, MIME allowlist)
 - `GET /tickets/:ticketId/attachments/:attachmentId/download-url` (short-lived signed URL; customer access blocked for internal-note attachments and unattached staff uploads)
 - `GET /tickets/:id/timeline` (chronological merge of public replies, internal notes for staff, and system events; customers never receive internal notes, `NOTE_ADDED`, or `ATTACHMENT_ADDED` items)
+- `PATCH /tickets/:id/assign` (staff workflow; enqueues `TICKET_ASSIGNED` notification)
+- `PATCH /tickets/:id/status` (staff workflow with role-aware transition matrix; enqueues `STATUS_CHANGED` notification)
+- `PATCH /tickets/:id/priority` (staff workflow)
+- `PATCH /tickets/:id/tags` (full replacement)
+- `PATCH /tickets/:id/category` (staff workflow)
+- `PATCH /tickets/:id/team` (staff workflow; emits `TEAM_TRANSFERRED` ticket event)
+- `GET /tickets/tags`, `GET /tickets/teams`, `GET /tickets/:id/assignable-users` (read-only workflow options for staff)
+- `GET /notifications`, `PATCH /notifications/:id/read`, `PATCH /notifications/read-all`
+- BullMQ notification queue producer (Redis-backed, skipped in test env, idempotent jobIds, REST never blocks on queue failures)
+- Socket.IO realtime gateway with JWT-cookie handshake, `user:{id}` / `ticket:{id}` / `ticket:{id}:staff` rooms, and four server events (`notification.created`, `ticket.updated`, `ticket.message.created.public`, `ticket.message.created.internal`); customers never join staff rooms
 - Password hashing with bcrypt
 - JWT auth via a single `httpOnly` cookie
 - `JwtAuthGuard`, `RolesGuard`, and `@Roles()`
-- Swagger docs for auth and ticket routes
+- Swagger docs for auth, ticket, and notification routes
 - Sign-in and sign-up flows in the frontend with `router.replace` post-auth
 - Session hydration via `/auth/me` with narrow auth-query retry on transient failure
 - Protected app routes
 - Role-aware app shell and navigation
 - Ticket list page with filters, sorting, pagination, and created-date display
 - Customer ticket creation page with backend-sourced read-only category options
-- Ticket detail page with metadata panel, combined conversation timeline, public reply composer, staff-only internal note composer, attachment upload with client-side validation, and signed-URL download
-- Logout cancels and removes role-sensitive ticket/timeline/attachment cache entries to prevent cross-role flashes
-- Backend auth and ticket tests, including conversation/attachment privacy regression coverage
+- Ticket detail page with metadata panel, combined conversation timeline, public reply composer, staff-only internal note composer, attachment upload with client-side validation, signed-URL download, and a staff-only workflow panel (status, priority, assignee, tags, category, team transfer)
+- Notification center: bell with unread badge, dropdown list with mark-as-read and mark-all-read controls, 30s polling fallback, role-sensitive cache clearing on logout
+- Frontend realtime client: singleton Socket.IO connection via a root-layout provider, per-ticket subscribe on detail mount, staff-only staff-room subscription, query invalidation only (no `setQueryData` write-through), neutral controller module that lets logout disconnect cleanly without a circular import
+- Logout cancels and removes role-sensitive ticket/timeline/notification cache entries and disconnects the realtime socket to prevent cross-role flashes
+- Backend auth, ticket, workflow, notification, queue, and realtime tests, including conversation/attachment privacy and customer-notification-filter regression coverage
 
 ### Intentionally deferred
 
@@ -106,25 +119,24 @@ The backend is a modular monolith. Milestone 0 established the repo foundation, 
 - `UserSession`
 - Password reset
 - Email verification
-- Assignment, priority, category, tag, and team workflow controls
-- BullMQ jobs/processors
-- Notification center
-- Realtime behavior / WebSocket gateway
-- SLA logic, deadlines, and breach detection
-- Real dashboard data
-- Admin CRUD/configuration features
+- SLA logic, deadlines, and breach detection (`SLA_AT_RISK` and `SLA_BREACHED` notification types exist in the schema but no SLA engine is wired)
+- Real dashboard data and reporting
+- Admin CRUD / workspace configuration features
+- Audit log
 - Email inbox sync, chatbot, billing
+- Advanced workflow automation
+- Attachment cleanup jobs
 
-Milestone 3 is complete. Milestone 4 has not started yet.
+Milestone 4 is complete. Milestone 5 has not started yet.
 
 ## Roles
 
-- **Customer**: sign up, sign in, create tickets, view own ticket list/detail, edit own subject/description, close or reopen own tickets, reply publicly on own non-closed tickets, attach files to their replies, and download attachments linked to public replies on their tickets
-- **Agent**: sign in with a seeded account, view team-visible / assigned tickets, reply publicly, add internal notes (including on closed tickets), upload attachments, see the full timeline (including internal notes and `NOTE_ADDED`/`ATTACHMENT_ADDED` events), and download any attachment on a visible ticket
-- **Manager**: sign in with a seeded account, view team-visible / directly assigned tickets, and use the same reply/note/attachment surfaces as Agents within their team visibility
-- **Admin**: sign in with a seeded account, view all current ticket-core surfaces and the full conversation/timeline/attachment surfaces; admin CRUD remains deferred
+- **Customer**: sign up, sign in, create tickets, view own ticket list/detail, edit own subject/description, close or reopen own tickets, reply publicly on own non-closed tickets, attach files to their replies, download attachments linked to public replies on their tickets, receive in-app notifications for replies/assignment/status changes (never for internal notes), and see realtime updates on their own tickets
+- **Agent**: sign in with a seeded account, view team-visible / assigned tickets, reply publicly, add internal notes (including on closed tickets), upload attachments, use the workflow panel to change status/priority/assignee/tags/category/team, see the full timeline (including internal notes and `NOTE_ADDED`/`ATTACHMENT_ADDED` events), download any attachment on a visible ticket, and receive in-app notifications and realtime updates for staff and customer activity on visible tickets
+- **Manager**: sign in with a seeded account, view team-visible / directly assigned tickets, and use the same reply/note/attachment/workflow/notification/realtime surfaces as Agents within their team visibility
+- **Admin**: sign in with a seeded account, view all current ticket-core surfaces and the full conversation/timeline/attachment/workflow/notification/realtime surfaces; admin CRUD remains deferred
 
-Assignment controls, priority/category/tag workflow controls, notifications, realtime updates, dashboards, and admin management workflows all come later.
+Dashboards, SLA logic, and admin management workflows all come later.
 
 ## Repository Structure
 
@@ -160,9 +172,12 @@ Required for live M3 attachment verification:
 - MinIO (or any S3-compatible service)
 - A pre-created `attachments` bucket on the MinIO endpoint
 
-Optional for later milestones:
+Required for live M4 notification queue and realtime verification:
 
-- Redis (used in M4+ for BullMQ jobs)
+- Redis (used by BullMQ for notification job production)
+- The API process running so the Socket.IO gateway can accept connections
+
+Docker Compose is the recommended way to provide PostgreSQL, Redis, and MinIO locally. When Docker is not available on the active machine, equivalent local or cloud services are acceptable. Automated tests mock the storage layer, the BullMQ queue, and the Socket.IO server, so green CI proves business and privacy rules but does not by itself exercise live storage, live queue processing, or live WebSocket flow. REST workflow actions and the frontend continue to function without Redis; only the notification side-effect and realtime emit are skipped in that case.
 
 ### Environment setup
 
@@ -255,13 +270,32 @@ Available now:
 - `POST /tickets`
 - `GET /tickets`
 - `GET /tickets/categories`
+- `GET /tickets/tags`
+- `GET /tickets/teams`
 - `GET /tickets/:id`
+- `GET /tickets/:id/assignable-users`
 - `PATCH /tickets/:id`
+- `PATCH /tickets/:id/assign`
+- `PATCH /tickets/:id/status`
+- `PATCH /tickets/:id/priority`
+- `PATCH /tickets/:id/tags`
+- `PATCH /tickets/:id/category`
+- `PATCH /tickets/:id/team`
 - `POST /tickets/:id/replies`
 - `POST /tickets/:id/internal-notes`
 - `POST /tickets/:id/attachments`
 - `GET /tickets/:ticketId/attachments/:attachmentId/download-url`
 - `GET /tickets/:id/timeline`
+- `GET /notifications`
+- `PATCH /notifications/:id/read`
+- `PATCH /notifications/read-all`
+
+Realtime (Socket.IO, JWT-cookie handshake):
+
+- `notification.created` (emitted to `user:{id}`)
+- `ticket.updated` (emitted to `ticket:{id}`)
+- `ticket.message.created.public` (emitted to `ticket:{id}`)
+- `ticket.message.created.internal` (emitted to `ticket:{id}:staff`)
 
 Behavior:
 
@@ -273,26 +307,29 @@ Behavior:
 - no email verification
 - customer-only ticket creation
 - customer-owned narrow ticket patch scope: subject edit, description edit, close, and reopen only
+- staff workflow controls (assign, status, priority, tags, category, team) are role-gated and hidden from customers; status transitions enforce a role-aware transition matrix; tag updates use full replacement
 - public replies blocked on closed tickets; internal notes remain allowed on closed tickets for staff
 - internal notes restricted to AGENT/MANAGER/ADMIN
 - attachments require a reachable S3-compatible service and the configured bucket
 - signed download URLs are short-lived; customer access is denied for internal-note attachments and unattached staff uploads
-- no assignment, team transfer, priority/category/tag workflow controls
-- no notifications, realtime, BullMQ jobs, SLA logic, dashboards, or admin CRUD
+- notifications are produced via a BullMQ queue with idempotent jobIds; REST workflow actions never block on queue or realtime failures
+- customers never receive `NOTE_ADDED` notifications (server-side hard filter)
+- realtime is additive: server emits `ticket.updated` and notification/message events; the frontend turns them into TanStack Query invalidations (no `setQueryData` write-through)
+- SLA logic, dashboards, admin CRUD, audit log, email inbox sync, chatbot, and billing remain deferred
 
 Frontend session state is derived from `/auth/me`, not from client-side token storage.
 
 ## Roadmap
 
-- **M0**: Project foundation
-- **M1**: Authentication, roles, and app shell
-- **M2**: Ticket core
-- **M3**: Conversation, internal notes, attachments
-- **M4**: Workflow actions, notifications, realtime
-- **M5**: SLA, dashboards, admin controls
-- **M6**: Testing hardening, polish, deployment
+- **M0**: Project foundation _(complete)_
+- **M1**: Authentication, roles, and app shell _(complete)_
+- **M2**: Ticket core _(complete)_
+- **M3**: Conversation, internal notes, attachments _(complete)_
+- **M4**: Workflow actions, notifications, realtime _(complete)_
+- **M5**: SLA, dashboards, admin controls _(not started)_
+- **M6**: Testing hardening, polish, deployment _(not started)_
 
-Next planned milestone after M3 completion: **M4 Workflow Actions, Notifications & Realtime**.
+Next planned milestone after M4 completion: **M5 SLA, Dashboards & Admin Controls**.
 
 ## Project Guardrails
 
@@ -300,5 +337,5 @@ Next planned milestone after M3 completion: **M4 Workflow Actions, Notifications
 - Milestone-based implementation only
 - No one-shot full build
 - Tests written alongside each milestone
-- BullMQ remains scaffold-only until M4; storage is wired for M3 attachments
+- BullMQ is wired in M4 for the notification queue; storage is wired in M3 for attachments
 - `.specify` and `AGENTS.md` are part of the durable project context

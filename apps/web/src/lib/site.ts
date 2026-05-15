@@ -4,7 +4,7 @@ import { appRoutePaths, type AppRoutePath } from '@/lib/app-access';
 export const siteTitle = 'Support Workspace';
 
 export const siteSubtitle =
-  'Ticket lists, customer ticket creation, conversation threads, internal notes, and attachments are available. Later workflow slices remain deferred.';
+  'Ticket lists, customer ticket creation, conversation threads, internal notes, attachments, staff workflow controls, in-app notifications, and realtime updates are available. SLA, dashboards, and admin CRUD remain deferred.';
 
 export interface AppNavigationItem {
   description?: string;
@@ -19,7 +19,7 @@ const appRouteDescriptions: Record<AppRoutePath, string> = {
   '/settings':
     'Admin configuration screens remain placeholder-only until Milestone 5.',
   '/tickets':
-    'Ticket list, filters, sorting, pagination, customer ticket creation, conversation, notes, and attachments are available.',
+    'Ticket list, filters, sorting, pagination, customer ticket creation, conversation, notes, attachments, staff workflow controls, in-app notifications, and realtime invalidation are available.',
 };
 
 const appRouteLabelsByRole: Record<

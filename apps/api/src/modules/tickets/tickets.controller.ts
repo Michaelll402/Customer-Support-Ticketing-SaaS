@@ -252,7 +252,7 @@ export class TicketsController {
   @UseGuards(JwtAuthGuard)
   @ApiOperation({
     summary:
-      'Add a public reply to a visible non-closed ticket. No automatic status changes are made and notifications remain deferred.',
+      'Add a public reply to a visible non-closed ticket. No automatic status changes are made; a TICKET_REPLIED notification is enqueued for relevant recipients via the BullMQ queue.',
   })
   @ApiBody({
     type: CreateTicketMessageDto,

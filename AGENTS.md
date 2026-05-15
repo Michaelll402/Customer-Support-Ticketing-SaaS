@@ -18,8 +18,9 @@ Read these files before making changes:
 - Milestone 0 is complete and closed
 - Milestone 1 is complete and closed
 - Milestone 2 is complete and closed
-- Milestone 3 is functionally complete and ready for the completion commit
-- Milestone 4 has not started yet
+- Milestone 3 is complete and closed
+- Milestone 4 is complete and closed
+- Milestone 5 has not started yet
 - M1 delivered:
   - `DB-01` identity schema for `Role` and `User`
   - `BE-01` lean auth foundation: register, login, logout, `/auth/me`, JWT cookie auth,
@@ -54,10 +55,46 @@ Read these files before making changes:
     - Staff-only internal note composer
     - Attachment upload with size/type validation and on-demand signed-URL download
     - Composer state resets on ticketId/kind changes
-- The next required step is focused spec extraction for M4:
-  - `DB-04` notifications schema and workflow event expansions
-  - `BE-04` workflow actions, notification queue, realtime gateway
-  - `FE-04` workflow controls, notification center, realtime UX
+- M4 delivered:
+  - `DB-04` `Notification` model, `NotificationType` enum
+    (`TICKET_ASSIGNED`, `TICKET_REPLIED`, `STATUS_CHANGED`, `NOTE_ADDED`,
+    `SLA_AT_RISK`, `SLA_BREACHED`), and `TEAM_TRANSFERRED` added to
+    `TicketEventType`
+  - `BE-04` workflow REST endpoints:
+    - `PATCH /tickets/:id/assign`
+    - `PATCH /tickets/:id/status`
+    - `PATCH /tickets/:id/priority`
+    - `PATCH /tickets/:id/tags` (full replacement)
+    - `PATCH /tickets/:id/category`
+    - `PATCH /tickets/:id/team`
+  - `BE-04` read-only workflow options:
+    - `GET /tickets/tags`
+    - `GET /tickets/teams`
+    - `GET /tickets/:id/assignable-users`
+  - `BE-04` notification REST API:
+    - `GET /notifications`
+    - `PATCH /notifications/:id/read`
+    - `PATCH /notifications/read-all`
+  - `BE-04` BullMQ notification queue production (Redis-backed,
+    skipped in test env, idempotent jobIds; REST workflow actions never
+    block on queue failures)
+  - `BE-04` Socket.IO realtime gateway with JWT-cookie handshake,
+    per-user/per-ticket/per-staff rooms, and four server events
+    (`notification.created`, `ticket.updated`,
+    `ticket.message.created.public`, `ticket.message.created.internal`);
+    customers never join staff rooms and never receive `NOTE_ADDED`
+    notifications (server-side hard filter)
+  - `FE-04` ticket workflow controls (status, priority, assignee,
+    tags, category, team transfer) on the ticket detail page,
+    role-gated and hidden from customers
+  - `FE-04` notification center: bell with unread badge, dropdown
+    list with mark-as-read and mark-all-read, 30s polling fallback,
+    role-sensitive cache clearing on logout
+  - `FE-04` frontend realtime client: singleton Socket.IO connection
+    via a root-layout provider, per-ticket subscribe on detail mount,
+    staff-only staff-room subscription, query invalidation only (no
+    `setQueryData` write-through), neutral controller module for
+    logout-driven disconnect
 
 ## What M0 Already Delivered
 
@@ -106,15 +143,18 @@ Read these files before making changes:
   dashboards, admin CRUD, broad workflow controls, automatic status changes on
   reply, attachment cleanup jobs, or email/chatbot/billing
 
-## Deferred Beyond M3
+## Deferred Beyond M4
 
-- BullMQ jobs/processors and Redis queue wiring
-- realtime workflows / WebSocket gateway
-- in-app notifications and notification center
-- SLA logic, deadlines, breach detection
-- dashboards and admin business features
-- workflow actions (assign/reassign, priority, tags, category, team transfer)
+- SLA logic, deadlines, breach detection (`SLA_AT_RISK` and `SLA_BREACHED`
+  notification types and SLA deadline columns exist in the schema but no
+  SLA engine is wired)
+- dashboards and reporting (manager overview, agent metrics, queue depth)
+- admin CRUD / workspace configuration (users, teams, categories, tags,
+  priorities, statuses, SLA plans)
+- audit log
 - email inbox sync, chatbot, billing
+- advanced workflow automation
+- attachment cleanup jobs
 
 ## Docker Policy
 
@@ -127,6 +167,18 @@ Read these files before making changes:
   pre-created `attachments` bucket.** The automated test suite uses a mocked
   Prisma client and mocked `StorageService`, so passing CI does not by itself
   prove the live storage path works end-to-end.
+- **M4 notification queue and realtime runtime verification requires a running
+  Redis instance** for BullMQ to enqueue and process notification jobs. The
+  automated suite mocks the queue and the Socket.IO server, so green CI proves
+  business and privacy rules but does not by itself exercise the live queue
+  worker or the live WebSocket flow. REST workflow actions remain correct and
+  do not fail when Redis is unavailable; only the notification side-effect and
+  realtime emit are skipped in that case.
+- Automated tests mock storage, queue, and realtime where needed. Live
+  end-to-end verification of M3 requires MinIO; live end-to-end verification of
+  M4 requires Redis. Docker Compose is the recommended way to provide both
+  locally, but equivalent local or cloud services are acceptable when Docker is
+  not available on the active machine.
 
 ## Working Rules For Future Agents
 

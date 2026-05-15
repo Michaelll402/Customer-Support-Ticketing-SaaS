@@ -3,7 +3,7 @@
 **Project**: Customer Support / Ticketing SaaS
 **Version**: 1.1.0
 **Created**: 2026-04-04
-**Last Updated**: 2026-04-22
+**Last Updated**: 2026-05-14
 **Status**: Active
 
 ---
@@ -37,8 +37,9 @@ No milestone may leave major half-built features behind.
 - **M0 is complete and closed.**
 - **M1 is complete and closed.**
 - **M2 is complete and closed.**
-- **M3 conversation, internal notes, and attachments are functionally complete and ready for the completion commit.**
-- **M4 has not started yet.** The next implementation step is focused M4 spec extraction.
+- **M3 is complete and closed.**
+- **M4 is complete and closed.**
+- **M5 has not started yet.** The next implementation step is focused M5 spec extraction.
 - The database/backend M1 lean-auth slice is implemented:
   - `DB-01` - Identity schema for `Role` and `User`
   - `BE-01` - Auth endpoints, JWT cookie auth, role guards, seed roles/users, backend tests
@@ -52,27 +53,88 @@ No milestone may leave major half-built features behind.
   - `DB-03` - `TicketMessage` (with `isInternal`) and `Attachment` (with nullable
     `messageId`, `uploadedById`, `storedKey`, `mimeType`, `sizeBytes`), plus
     `TicketEventType` values `REPLIED`, `NOTE_ADDED`, `ATTACHMENT_ADDED`
-  - `BE-03` - Public reply, internal note, attachment upload, signed download URL,
-    and combined timeline endpoints; customer-side filtering enforced at the
-    query layer; attachment linking restricted to the uploading actor; metadata
+  - `BE-03` - `POST /tickets/:id/replies`, `POST /tickets/:id/internal-notes`,
+    `POST /tickets/:id/attachments`,
+    `GET /tickets/:ticketId/attachments/:attachmentId/download-url`, and
+    `GET /tickets/:id/timeline`; customer-side filtering enforced at the query
+    layer; attachment linking restricted to the uploading actor; metadata
     failures wrap raw errors in a generic 500 and best-effort delete the object
   - `FE-03` - Combined timeline, public reply composer, staff-only internal note
     composer, attachment upload with client-side validation, on-demand signed-URL
     download, composer state reset on ticketId/kind changes, logout cache
     clearing for role-sensitive ticket queries
+- M4 includes:
+  - `DB-04` - `Notification` model, `NotificationType` enum
+    (`TICKET_ASSIGNED`, `TICKET_REPLIED`, `STATUS_CHANGED`, `NOTE_ADDED`,
+    `SLA_AT_RISK`, `SLA_BREACHED`), and `TEAM_TRANSFERRED` added to
+    `TicketEventType`
+  - `BE-04 Slice A` - Workflow REST endpoints
+    (`PATCH /tickets/:id/assign`, `PATCH /tickets/:id/status`,
+    `PATCH /tickets/:id/priority`, `PATCH /tickets/:id/tags` with full
+    replacement, `PATCH /tickets/:id/category`, `PATCH /tickets/:id/team`),
+    role-aware status transition matrix, and `GET /tickets/tags` plus
+    `GET /tickets/:id/assignable-users` read-only options
+  - `BE-04 tiny team options endpoint` - `GET /tickets/teams` read-only
+    options endpoint added before FE work to close the team-listing contract
+    gap
+  - `BE-04 Slice B` - Notification REST API
+    (`GET /notifications` with pagination + `unreadOnly` filter,
+    `PATCH /notifications/:id/read` idempotent mark-read,
+    `PATCH /notifications/read-all`)
+  - `BE-04 Slice C` - BullMQ notification queue production: Redis-backed
+    `notifications` queue with `notifications.create` job name, idempotent
+    jobIds derived from event UUIDs, queue skipped in `NODE_ENV=test`,
+    `NotificationsProcessor` writes notification rows via
+    `createForRecipients` and emits one `notification.created` realtime
+    event per recipient; REST workflow actions never block on queue
+    failures
+  - `BE-04 Slice D` - Socket.IO realtime gateway with JWT-cookie handshake,
+    `user:{id}` / `ticket:{id}` / `ticket:{id}:staff` room model,
+    four server events (`notification.created`, `ticket.updated`,
+    `ticket.message.created.public`, `ticket.message.created.internal`),
+    visibility checks on subscribe acks, customers refused from staff
+    rooms, and `RealtimeService` `safeEmit` wrappers so emit failures
+    never bubble into the REST request cycle
+  - `FE-04 Slice A` - Ticket workflow controls on the detail page:
+    status, priority, assignee, category, tag (staged Set with diff-aware
+    Apply), and team transfer with a two-step confirm; role-gated and
+    hidden from customers
+  - `FE-04 Slice B` - Notification center: bell with unread badge,
+    dropdown list, mark-as-read on click with fire-and-forget mutation,
+    mark-all-read, 30s polling fallback, role-sensitive cache clearing
+    widened to include notifications on logout
+  - `FE-04 Slice C` - Frontend realtime client: singleton
+    `socket.io-client` connection via a root-layout `RealtimeProvider`,
+    per-ticket subscribe on detail mount, staff-only staff-room
+    subscription via `useTicketRealtimeSubscription`, query invalidation
+    only (no `setQueryData` write-through), neutral
+    `lib/realtime-controller.ts` module that lets `useLogout.onMutate`
+    disconnect the socket before clearing role-sensitive caches without a
+    circular import
 - M0 delivered the monorepo foundation, `apps/web`, `apps/api`, shared packages,
   Prisma initialization, Swagger, env validation, Pino logging, and testing setup.
-- **BullMQ is scaffolded only.** No jobs, processors, or Redis queue wiring are
-  implemented yet; this remains deferred until M4.
-- **Storage abstraction is now wired in M3.** Attachment upload and signed-URL
+- **BullMQ is wired in M4** for the `notifications` queue. Jobs are produced from
+  REST workflow handlers and consumed by `NotificationsProcessor`, which writes
+  `Notification` rows and emits per-recipient realtime events. Queue
+  registration is skipped in `NODE_ENV=test`, and REST workflow actions never
+  block on queue or realtime failures.
+- **Storage abstraction is wired in M3.** Attachment upload and signed-URL
   download flow through a hand-rolled SigV4 client against the configured
   S3-compatible endpoint (MinIO by default).
 - **Docker is postponed locally for now** on the current machine, but the repo must stay
   Docker-ready for later milestones and final validation. From M3 forward, live
   attachment verification requires a reachable S3-compatible service (MinIO or
-  equivalent) and a pre-created `attachments` bucket. The automated integration
-  suite uses a mocked Prisma client and mocked `StorageService`, so passing CI
-  does not by itself prove the live storage path works end-to-end.
+  equivalent) and a pre-created `attachments` bucket. From M4 forward, live
+  notification queue and realtime verification requires a reachable Redis
+  instance.
+- **Verification posture**: automated tests mock the Prisma client,
+  `StorageService`, the BullMQ queue, and the Socket.IO server where needed,
+  so passing CI proves business and privacy rules but does not by itself
+  exercise live storage, live queue processing, or live WebSocket flow. Live
+  end-to-end verification of M3 requires MinIO; live end-to-end verification of
+  M4 requires Redis. Docker Compose is the recommended way to provide both
+  locally, but equivalent local or cloud services are acceptable when Docker is
+  not available on the active machine.
 - Until a milestone-specific spec says otherwise, **local non-Docker verification is
   acceptable in early milestones**.
 
@@ -536,16 +598,17 @@ Attachment
 **Message endpoints**:
 
 - `POST /tickets/:id/replies` — add public reply (customer, agent, manager, admin)
-- `POST /tickets/:id/notes` — add internal note (agent, manager, admin only)
-- `GET /tickets/:id/messages` — return messages for a ticket
-  - Customers receive only public replies (`isInternal = false`)
-  - Agents/managers/admins receive all messages
+- `POST /tickets/:id/internal-notes` — add internal note (agent, manager, admin only)
+- `GET /tickets/:id/timeline` — return the combined timeline (messages plus system events) for a ticket
+  - Customers receive only public replies (`isInternal = false`) and never receive `NOTE_ADDED` or `ATTACHMENT_ADDED` system events
+  - Agents/managers/admins receive all messages and all system events
 
 **Attachment endpoints**:
 
 - `POST /tickets/:id/attachments` — upload file (multipart); stored in S3
-- `GET /attachments/:id/download` — returns a signed URL for authorized access
+- `GET /tickets/:ticketId/attachments/:attachmentId/download-url` — returns a short-lived signed URL for authorized access
   - User must have visibility of the parent ticket to download
+  - Customer access is denied for internal-note attachments and unattached staff uploads
 
 **Event emission**: `TicketEvent` rows added for `REPLIED`, `NOTE_ADDED`, `ATTACHMENT_ADDED`.
 

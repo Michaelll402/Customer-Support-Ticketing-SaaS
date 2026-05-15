@@ -876,7 +876,6 @@ const TicketComposers = ({
       </h2>
       <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
         Add customer-visible replies or staff-only notes with attachments.
-        Workflow actions remain deferred.
       </p>
 
       <div className="mt-6 grid gap-4">
@@ -1118,8 +1117,9 @@ export const TicketDetailPage = ({ ticketId }: { ticketId: string }) => {
               {ticket.subject}
             </h1>
             <p className="mt-3 text-sm leading-6 text-slate-600">
-              Ticket metadata, conversation, internal notes, and attachments are
-              available here. Workflow actions remain deferred.
+              Ticket metadata, conversation, internal notes, attachments, and
+              staff workflow controls are available here. Realtime invalidation
+              keeps the view fresh while you collaborate.
             </p>
           </div>
 

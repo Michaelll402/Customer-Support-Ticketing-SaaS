@@ -229,8 +229,9 @@ export const CreateTicketPage = () => {
                   )}
                 </select>
                 <span className="text-xs text-slate-500">
-                  Priority stays customer-selectable. Staff workflow controls
-                  remain deferred.
+                  Priority stays customer-selectable at creation. Staff can
+                  adjust priority and other workflow fields after creation from
+                  the ticket detail page.
                 </span>
               </label>
 
