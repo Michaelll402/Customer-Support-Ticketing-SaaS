@@ -1,0 +1,79 @@
+name: Deploy to Azure
+
+on:
+  push:
+    branches:
+      - devops-assignment-azure
+  workflow_dispatch:
+
+env:
+  ACR_NAME: acrcsticketdevwf87dv
+  ACR_LOGIN_SERVER: acrcsticketdevwf87dv.azurecr.io
+  RESOURCE_GROUP: rg-csticket-dev-wf87dv
+  API_APP_NAME: app-api-csticket-dev-wf87dv
+  WEB_APP_NAME: app-web-csticket-dev-wf87dv
+  API_BASE_URL: https://app-api-csticket-dev-wf87dv.azurewebsites.net
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to Azure Container Registry
+        run: az acr login --name $ACR_NAME
+
+      - name: Build API image
+        run: |
+          docker build \
+            -f Dockerfile.api \
+            -t $ACR_LOGIN_SERVER/customer-support-api:${{ github.sha }} \
+            -t $ACR_LOGIN_SERVER/customer-support-api:latest \
+            .
+
+      - name: Build Web image
+        run: |
+          docker build \
+            -f Dockerfile.web \
+            --build-arg NEXT_PUBLIC_API_BASE_URL=$API_BASE_URL \
+            -t $ACR_LOGIN_SERVER/customer-support-web:${{ github.sha }} \
+            -t $ACR_LOGIN_SERVER/customer-support-web:latest \
+            .
+
+      - name: Push API image
+        run: |
+          docker push $ACR_LOGIN_SERVER/customer-support-api:${{ github.sha }}
+          docker push $ACR_LOGIN_SERVER/customer-support-api:latest
+
+      - name: Push Web image
+        run: |
+          docker push $ACR_LOGIN_SERVER/customer-support-web:${{ github.sha }}
+          docker push $ACR_LOGIN_SERVER/customer-support-web:latest
+
+      - name: Deploy API container
+        run: |
+          az webapp config container set \
+            --name $API_APP_NAME \
+            --resource-group $RESOURCE_GROUP \
+            --container-image-name $ACR_LOGIN_SERVER/customer-support-api:${{ github.sha }} \
+            --container-registry-url https://$ACR_LOGIN_SERVER
+
+      - name: Deploy Web container
+        run: |
+          az webapp config container set \
+            --name $WEB_APP_NAME \
+            --resource-group $RESOURCE_GROUP \
+            --container-image-name $ACR_LOGIN_SERVER/customer-support-web:${{ github.sha }} \
+            --container-registry-url https://$ACR_LOGIN_SERVER
+
+      - name: Restart Azure Web Apps
+        run: |
+          az webapp restart --name $API_APP_NAME --resource-group $RESOURCE_GROUP
+          az webapp restart --name $WEB_APP_NAME --resource-group $RESOURCE_GROUP
