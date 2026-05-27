@@ -1,0 +1,21 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:4000
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+
+RUN corepack enable && corepack prepare pnpm@10.0.0 --activate
+
+COPY . .
+
+RUN pnpm install --frozen-lockfile
+RUN pnpm build:packages
+RUN pnpm --filter @customer-support/web build
+
+EXPOSE 3000
+
+CMD ["pnpm", "--filter", "@customer-support/web", "start"]

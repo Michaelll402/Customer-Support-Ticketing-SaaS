@@ -30,3 +30,18 @@ packages/ui/src/index.d.ts
 
 
 .claude/
+
+# Terraform local state/secrets
+infra/.terraform/
+infra/terraform.tfstate
+infra/terraform.tfstate.backup
+infra/terraform.tfvars
+infra/*.tfplan
+
+
+# Terraform local state/secrets
+infra/.terraform/
+infra/terraform.tfstate
+infra/terraform.tfstate.backup
+infra/terraform.tfvars
+infra/*.tfplan

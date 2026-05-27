@@ -1,0 +1,8 @@
+project_name = "csticket"
+location     = "westeurope"
+environment  = "dev"
+
+postgres_admin_username = "pgadminuser"
+postgres_admin_password = "CHANGE_ME_STRONG_PASSWORD"
+
+jwt_secret = "CHANGE_ME_LONG_RANDOM_SECRET"

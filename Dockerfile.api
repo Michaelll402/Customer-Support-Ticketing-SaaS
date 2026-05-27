@@ -1,0 +1,22 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV API_HOST=0.0.0.0
+ENV API_PORT=4000
+
+RUN corepack enable && corepack prepare pnpm@10.0.0 --activate
+
+COPY . .
+
+RUN pnpm install --frozen-lockfile
+RUN pnpm prisma:generate
+RUN pnpm build:packages
+RUN pnpm --filter @customer-support/api build
+
+EXPOSE 4000
+
+WORKDIR /app/apps/api
+
+CMD ["sh", "-c", "pnpm exec prisma migrate deploy && node dist/main.js"]

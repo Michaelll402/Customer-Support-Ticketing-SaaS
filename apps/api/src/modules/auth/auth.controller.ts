@@ -157,7 +157,10 @@ export class AuthController {
     return {
       httpOnly: true,
       path: '/',
-      sameSite: 'lax',
+      sameSite:
+        this.configService.getOrThrow<string>('app.env') === 'production'
+          ? 'none'
+          : 'lax',
       secure: this.configService.getOrThrow<string>('app.env') === 'production',
     };
   }
