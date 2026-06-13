@@ -180,7 +180,8 @@ export class TicketsController {
 
   @Get('tags')
   @HttpCode(200)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleName.AGENT, RoleName.MANAGER, RoleName.ADMIN)
   @ApiOperation({
     summary:
       'Return the read-only ticket tag options used by staff workflow controls.',
@@ -189,6 +190,9 @@ export class TicketsController {
     description: 'Ticket tags returned successfully.',
     type: TicketTagOptionDto,
     isArray: true,
+  })
+  @ApiForbiddenResponse({
+    description: 'Only staff roles may list ticket tag options.',
   })
   @ApiUnauthorizedResponse({
     description: 'Authentication is required.',
@@ -199,7 +203,8 @@ export class TicketsController {
 
   @Get('teams')
   @HttpCode(200)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleName.AGENT, RoleName.MANAGER, RoleName.ADMIN)
   @ApiOperation({
     summary:
       'Return the read-only ticket team options used by staff team-transfer controls.',
@@ -208,6 +213,9 @@ export class TicketsController {
     description: 'Ticket teams returned successfully.',
     type: TicketTeamOptionDto,
     isArray: true,
+  })
+  @ApiForbiddenResponse({
+    description: 'Only staff roles may list ticket team options.',
   })
   @ApiUnauthorizedResponse({
     description: 'Authentication is required.',

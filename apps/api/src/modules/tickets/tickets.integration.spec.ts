@@ -37,11 +37,19 @@ interface StoredUser {
   email: string;
   firstName: string;
   id: string;
+  isActive?: boolean;
   lastName: string;
   passwordHash: string;
   role: StoredRole;
   roleId: string;
+  tokenVersion?: number;
 }
+
+const withUserDefaults = (user: StoredUser) => ({
+  isActive: true,
+  tokenVersion: 0,
+  ...user,
+});
 
 interface StoredTeam {
   createdAt: Date;
@@ -286,6 +294,11 @@ type TicketEventFindManyArgs = {
             in?: TicketEventType[];
           };
     };
+    type?:
+      | TicketEventType
+      | {
+          in?: TicketEventType[];
+        };
     ticketId?: string;
   };
   include?: {
@@ -572,15 +585,17 @@ const createPrismaMock = () => {
           email: data.email,
           firstName: data.firstName,
           id: randomUUID(),
+          isActive: true,
           lastName: data.lastName,
           passwordHash: data.passwordHash,
           role,
           roleId: role.id,
+          tokenVersion: 0,
         };
 
         users.push(user);
 
-        return user;
+        return withUserDefaults(user);
       },
     ),
     findUnique: vi.fn(
@@ -592,15 +607,14 @@ const createPrismaMock = () => {
           id?: string;
         };
       }) => {
-        if (where.email) {
-          return users.find((user) => user.email === where.email) ?? null;
-        }
+        const found =
+          (where.email
+            ? users.find((user) => user.email === where.email)
+            : where.id
+              ? users.find((user) => user.id === where.id)
+              : undefined) ?? null;
 
-        if (where.id) {
-          return users.find((user) => user.id === where.id) ?? null;
-        }
-
-        return null;
+        return found ? withUserDefaults(found) : null;
       },
     ),
     findMany: vi.fn(async ({ where, orderBy }: UserFindManyArgs = {}) => {
@@ -940,6 +954,36 @@ const createPrismaMock = () => {
 
       return attachTicketRelations(ticket);
     }),
+    updateMany: vi.fn(
+      async ({
+        data,
+        where,
+      }: {
+        data: { status?: TicketStatus };
+        where: { id?: string; status?: TicketStatus };
+      }) => {
+        let count = 0;
+
+        for (const ticket of tickets) {
+          if (where.id !== undefined && ticket.id !== where.id) {
+            continue;
+          }
+
+          if (where.status !== undefined && ticket.status !== where.status) {
+            continue;
+          }
+
+          if (data.status !== undefined) {
+            ticket.status = data.status;
+          }
+
+          ticket.updatedAt = new Date();
+          count += 1;
+        }
+
+        return { count };
+      },
+    ),
     findUnique: vi.fn(
       async ({
         where,
@@ -1075,6 +1119,20 @@ const createPrismaMock = () => {
                 typeof where.NOT.type === 'string' &&
                 event.type === where.NOT.type
               ) {
+                return false;
+              }
+            }
+
+            if (where?.type) {
+              if (
+                typeof where.type === 'object' &&
+                where.type.in &&
+                !where.type.in.includes(event.type)
+              ) {
+                return false;
+              }
+
+              if (typeof where.type === 'string' && event.type !== where.type) {
                 return false;
               }
             }
@@ -3178,6 +3236,138 @@ describe('Tickets integration', () => {
     ).toBe(false);
   });
 
+  it('omits staff-only workflow events and staff emails from a customer timeline', async () => {
+    const customerAgent = request.agent(app.getHttpServer());
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+    const customer = prismaMock.userStore.find(
+      (user) => user.email === 'customer@demo.test',
+    )!;
+    const staffUser = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
+    )!;
+
+    prismaMock.ticketEventStore.push(
+      {
+        actorId: customer.id,
+        createdAt: new Date('2026-04-22T10:00:00.000Z'),
+        id: randomUUID(),
+        metadata: null,
+        ticketId: ownTicket.id,
+        type: TicketEventType.CREATED,
+      },
+      {
+        actorId: staffUser.id,
+        createdAt: new Date('2026-04-22T10:05:00.000Z'),
+        id: randomUUID(),
+        metadata: { toAssigneeId: staffUser.id },
+        ticketId: ownTicket.id,
+        type: TicketEventType.ASSIGNED,
+      },
+      {
+        actorId: staffUser.id,
+        createdAt: new Date('2026-04-22T10:10:00.000Z'),
+        id: randomUUID(),
+        metadata: { fromPriority: 'LOW', toPriority: 'HIGH' },
+        ticketId: ownTicket.id,
+        type: TicketEventType.PRIORITY_CHANGED,
+      },
+      {
+        actorId: staffUser.id,
+        createdAt: new Date('2026-04-22T10:15:00.000Z'),
+        id: randomUUID(),
+        metadata: { toTeamId: randomUUID() },
+        ticketId: ownTicket.id,
+        type: TicketEventType.TEAM_TRANSFERRED,
+      },
+      {
+        actorId: staffUser.id,
+        createdAt: new Date('2026-04-22T10:20:00.000Z'),
+        id: randomUUID(),
+        metadata: { fromStatus: 'OPEN', toStatus: 'PENDING' },
+        ticketId: ownTicket.id,
+        type: TicketEventType.STATUS_CHANGED,
+      },
+    );
+
+    await customerAgent
+      .post('/auth/login')
+      .send({ email: 'customer@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await customerAgent
+      .get(`/tickets/${ownTicket.id}/timeline`)
+      .expect(200);
+
+    const eventTypes = (
+      response.body.items as Array<{ eventType?: TicketEventType }>
+    )
+      .map((item) => item.eventType)
+      .filter((type): type is TicketEventType => type !== undefined);
+
+    expect(eventTypes).toContain(TicketEventType.CREATED);
+    expect(eventTypes).toContain(TicketEventType.STATUS_CHANGED);
+    expect(eventTypes).not.toContain(TicketEventType.ASSIGNED);
+    expect(eventTypes).not.toContain(TicketEventType.PRIORITY_CHANGED);
+    expect(eventTypes).not.toContain(TicketEventType.TEAM_TRANSFERRED);
+
+    const items = response.body.items as Array<{
+      actor?: { email?: string };
+      author?: { email?: string };
+    }>;
+    const exposesEmail = items.some(
+      (item) =>
+        item.actor?.email !== undefined || item.author?.email !== undefined,
+    );
+    expect(exposesEmail).toBe(false);
+  });
+
+  it('hides the staff assignee email from a customer detail view but exposes it to staff', async () => {
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+    const staffUser = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
+    )!;
+    ownTicket.assigneeId = staffUser.id;
+
+    const customerAgent = request.agent(app.getHttpServer());
+    await customerAgent
+      .post('/auth/login')
+      .send({ email: 'customer@demo.test', password: 'Password1!' })
+      .expect(200);
+    const customerResponse = await customerAgent
+      .get(`/tickets/${ownTicket.id}`)
+      .expect(200);
+    expect(customerResponse.body.assignee).toMatchObject({ id: staffUser.id });
+    expect(customerResponse.body.assignee.email).toBeUndefined();
+
+    const staffAgent = request.agent(app.getHttpServer());
+    await staffAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+    const staffResponse = await staffAgent
+      .get(`/tickets/${ownTicket.id}`)
+      .expect(200);
+    expect(staffResponse.body.assignee).toMatchObject({
+      id: staffUser.id,
+      email: 'agent@demo.test',
+    });
+  });
+
+  it('forbids customers from listing staff-only tag and team options', async () => {
+    const customerAgent = request.agent(app.getHttpServer());
+    await customerAgent
+      .post('/auth/login')
+      .send({ email: 'customer@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await customerAgent.get('/tickets/tags').expect(403);
+    await customerAgent.get('/tickets/teams').expect(403);
+  });
+
   it('returns a staff-visible timeline with internal notes and NOTE_ADDED events in chronological order', async () => {
     const agent = request.agent(app.getHttpServer());
     const teamTicket = prismaMock.ticketStore.find(
@@ -3956,6 +4146,36 @@ describe('Tickets integration', () => {
       expect(event!.metadata).toMatchObject({ fromStatus: from, toStatus: to });
     },
   );
+
+  it('returns 409 and writes no event when the status changed concurrently', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    ticket.status = TicketStatus.OPEN;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    // Simulate a concurrent change: the guarded conditional update matches zero
+    // rows because another request already moved the ticket out of OPEN.
+    prismaMock.ticket.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await httpAgent
+      .patch(`/tickets/${ticket.id}/status`)
+      .send({ status: TicketStatus.PENDING })
+      .expect(409);
+
+    expect(
+      prismaMock.ticketEventStore.find(
+        (entry) =>
+          entry.ticketId === ticket.id &&
+          entry.type === TicketEventType.STATUS_CHANGED,
+      ),
+    ).toBeUndefined();
+  });
 
   it.each([
     { from: TicketStatus.RESOLVED, to: TicketStatus.PENDING },

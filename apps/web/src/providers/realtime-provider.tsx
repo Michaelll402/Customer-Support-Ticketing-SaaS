@@ -63,6 +63,12 @@ export const RealtimeProvider = ({ children }: RealtimeProviderProps) => {
   const userId = currentUserQuery.data?.id ?? null;
 
   const socketRef = useRef<Socket | null>(null);
+  // Rooms the client currently intends to be in. The server treats every
+  // (re)connect as a brand-new socket and only auto-joins the user room, so we
+  // replay these on `connect` to restore ticket/staff subscriptions after a
+  // reconnect.
+  const subscribedTicketsRef = useRef<Set<string>>(new Set());
+  const subscribedStaffRef = useRef<Set<string>>(new Set());
   const [status, setStatus] = useState<RealtimeStatus>('idle');
 
   useEffect(() => {
@@ -79,7 +85,18 @@ export const RealtimeProvider = ({ children }: RealtimeProviderProps) => {
     });
     socketRef.current = socket;
 
-    const handleConnect = () => setStatus('connected');
+    const handleConnect = () => {
+      setStatus('connected');
+      // Restore room membership after a (re)connect.
+      for (const id of subscribedTicketsRef.current) {
+        socket.emit(realtimeClientEvents.ticketSubscribe, { ticketId: id });
+      }
+      for (const id of subscribedStaffRef.current) {
+        socket.emit(realtimeClientEvents.ticketSubscribeStaff, {
+          ticketId: id,
+        });
+      }
+    };
     const handleDisconnect = () => setStatus('disconnected');
     const handleConnectError = (error: unknown) => {
       setStatus('error');
@@ -101,6 +118,11 @@ export const RealtimeProvider = ({ children }: RealtimeProviderProps) => {
         queryKey: ['tickets', 'detail', ticketId],
       });
       void queryClient.invalidateQueries({ queryKey: ['tickets', 'list'] });
+      // Workflow changes also append a system event to the timeline, so refresh
+      // it for any viewer watching this ticket's thread.
+      void queryClient.invalidateQueries({
+        queryKey: ['tickets', 'timeline', ticketId],
+      });
     };
 
     const handleTicketMessageCreated = (raw: unknown) => {
@@ -177,19 +199,56 @@ export const RealtimeProvider = ({ children }: RealtimeProviderProps) => {
     }
   }, []);
 
+  // These stay referentially stable across socket status transitions so that
+  // useTicketRealtimeSubscription's effect does not re-run (and re-emit
+  // subscribe/unsubscribe) every time the connection status changes.
+  const subscribeTicket = useCallback(
+    (ticketId: string) => {
+      subscribedTicketsRef.current.add(ticketId);
+      return emitWithAck(realtimeClientEvents.ticketSubscribe, ticketId);
+    },
+    [emitWithAck],
+  );
+
+  const unsubscribeTicket = useCallback(
+    (ticketId: string) => {
+      subscribedTicketsRef.current.delete(ticketId);
+      return emitWithAck(realtimeClientEvents.ticketUnsubscribe, ticketId);
+    },
+    [emitWithAck],
+  );
+
+  const subscribeTicketStaff = useCallback(
+    (ticketId: string) => {
+      subscribedStaffRef.current.add(ticketId);
+      return emitWithAck(realtimeClientEvents.ticketSubscribeStaff, ticketId);
+    },
+    [emitWithAck],
+  );
+
+  const unsubscribeTicketStaff = useCallback(
+    (ticketId: string) => {
+      subscribedStaffRef.current.delete(ticketId);
+      return emitWithAck(realtimeClientEvents.ticketUnsubscribeStaff, ticketId);
+    },
+    [emitWithAck],
+  );
+
   const value = useMemo<RealtimeContextValue>(
     () => ({
       status,
-      subscribeTicket: (ticketId) =>
-        emitWithAck(realtimeClientEvents.ticketSubscribe, ticketId),
-      unsubscribeTicket: (ticketId) =>
-        emitWithAck(realtimeClientEvents.ticketUnsubscribe, ticketId),
-      subscribeTicketStaff: (ticketId) =>
-        emitWithAck(realtimeClientEvents.ticketSubscribeStaff, ticketId),
-      unsubscribeTicketStaff: (ticketId) =>
-        emitWithAck(realtimeClientEvents.ticketUnsubscribeStaff, ticketId),
+      subscribeTicket,
+      unsubscribeTicket,
+      subscribeTicketStaff,
+      unsubscribeTicketStaff,
     }),
-    [emitWithAck, status],
+    [
+      status,
+      subscribeTicket,
+      unsubscribeTicket,
+      subscribeTicketStaff,
+      unsubscribeTicketStaff,
+    ],
   );
 
   return (

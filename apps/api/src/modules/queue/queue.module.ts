@@ -19,6 +19,15 @@ const queueImports: DynamicModule[] = isTestEnv
         useFactory: (config: ConfigService) => ({
           connection: {
             url: config.getOrThrow<string>('queue.redisUrl'),
+            // Bound the reconnect delay so a Redis outage produces a steady,
+            // capped retry instead of a tight reconnect loop.
+            retryStrategy: (times: number) => Math.min(times * 200, 2000),
+          },
+          defaultJobOptions: {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 1000 },
+            removeOnComplete: { count: 1000 },
+            removeOnFail: { count: 1000 },
           },
         }),
       }),

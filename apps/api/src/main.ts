@@ -9,6 +9,7 @@ import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { buildAllowedOrigins } from './common/cors/build-allowed-origins';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { CsrfOriginGuard } from './common/security/csrf-origin.guard';
 import { validationPipeOptions } from './common/validation/validation.pipe-options';
 import { AUTH_COOKIE_SECURITY_NAME } from './modules/auth/auth.constants';
 
@@ -33,6 +34,10 @@ const bootstrap = async () => {
     credentials: true,
     origin: buildAllowedOrigins(webOrigin),
   });
+
+  // CSRF defense for unsafe methods: CORS only blocks reading the response, not
+  // sending an authenticated cross-site write, so validate Origin/Referer too.
+  app.useGlobalGuards(new CsrfOriginGuard(configService));
 
   const swaggerDocument = SwaggerModule.createDocument(
     app,

@@ -37,3 +37,8 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Test (API)
+        # API tests mock Prisma, storage, the BullMQ queue, and Socket.IO, so no
+        # live Postgres/Redis/MinIO services are required in CI.
+        run: pnpm --filter @customer-support/api test

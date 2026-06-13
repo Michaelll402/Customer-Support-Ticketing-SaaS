@@ -20,6 +20,18 @@ Read these files before making changes:
 - Milestone 2 is complete and closed
 - Milestone 3 is complete and closed
 - Milestone 4 is complete and closed
+- Milestone 4.5 (post-audit hardening) is applied: realtime/REST malformed-cookie
+  safety, customer-facing privacy serialization (staff emails and internal
+  workflow events withheld from customers), staff-only tag/team option
+  endpoints, BullMQ Redis-failure resilience, robust env boolean parsing, and
+  frontend realtime resubscribe / cache-invalidation / attachment-download
+  fixes. No new product scope was added.
+- Milestone 4.6 (pre-M5 hardening) is applied: atomic guarded staff status
+  transitions (409 on concurrent change), a dependency-free CSRF Origin/Referer
+  guard on unsafe methods, and JWT revocation via `User.tokenVersion` +
+  `User.isActive` (the JWT strategy now re-validates against the database and
+  returns the fresh role). Mechanism only — admin role-change endpoints remain
+  M5. Requires the `user_active_token_version` migration.
 - Milestone 5 has not started yet
 - M1 delivered:
   - `DB-01` identity schema for `Role` and `User`

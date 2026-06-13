@@ -15,10 +15,12 @@ class TicketUserSummaryDto {
   })
   id!: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    description:
+      'Email address. Omitted for staff users in customer-facing responses so staff contact details are not exposed.',
     example: 'customer@example.test',
   })
-  email!: string;
+  email?: string;
 
   @ApiProperty({
     example: 'Casey',
@@ -191,7 +193,10 @@ export class TicketDetailDto {
   })
   updatedAt!: Date;
 
-  static fromRecord(record: TicketDetailRecord): TicketDetailDto {
+  static fromRecord(
+    record: TicketDetailRecord,
+    includeStaffEmail = true,
+  ): TicketDetailDto {
     return {
       id: record.id,
       number: record.number,
@@ -201,6 +206,8 @@ export class TicketDetailDto {
       priority: record.priority,
       requester: {
         id: record.requester.id,
+        // The requester is always the ticket owner, so returning their own
+        // email is not a staff-PII disclosure.
         email: record.requester.email,
         firstName: record.requester.firstName,
         lastName: record.requester.lastName,
@@ -208,9 +215,9 @@ export class TicketDetailDto {
       assignee: record.assignee
         ? {
             id: record.assignee.id,
-            email: record.assignee.email,
             firstName: record.assignee.firstName,
             lastName: record.assignee.lastName,
+            ...(includeStaffEmail ? { email: record.assignee.email } : {}),
           }
         : null,
       team: record.team ? TicketTeamSummaryDto.fromTeam(record.team) : null,

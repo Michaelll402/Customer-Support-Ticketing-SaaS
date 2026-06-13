@@ -47,6 +47,21 @@ import {
 
 import type { QueryClient } from '@tanstack/react-query';
 
+const invalidateTicketWorkflowCaches = async (
+  queryClient: QueryClient,
+  ticketId: string,
+) => {
+  await Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: ['tickets', 'detail', ticketId],
+    }),
+    queryClient.invalidateQueries({ queryKey: ['tickets', 'list'] }),
+    queryClient.invalidateQueries({
+      queryKey: ['tickets', 'timeline', ticketId],
+    }),
+  ]);
+};
+
 export const useTickets = (query: TicketListQuery) =>
   useQuery({
     queryKey: ['tickets', 'list', query],
@@ -115,11 +130,7 @@ export const useCreateTicketPublicReply = (ticketId: string) => {
   return useMutation({
     mutationFn: (input: CreateTicketMessageInput) =>
       createTicketPublicReply(ticketId, input),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: ['tickets', 'timeline', ticketId],
-      });
-    },
+    onSuccess: () => invalidateTicketWorkflowCaches(queryClient, ticketId),
   });
 };
 
@@ -129,7 +140,18 @@ export const useCreateTicketInternalNote = (ticketId: string) => {
   return useMutation({
     mutationFn: (input: CreateTicketMessageInput) =>
       createTicketInternalNote(ticketId, input),
+    onSuccess: () => invalidateTicketWorkflowCaches(queryClient, ticketId),
+  });
+};
+
+export const useUploadTicketAttachment = (ticketId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation<TicketTimelineAttachment, Error, File>({
+    mutationFn: (file) => uploadTicketAttachment(ticketId, file),
     onSuccess: async () => {
+      // Uploading writes a staff-visible ATTACHMENT_ADDED timeline event before
+      // the message is posted, so refresh the timeline to surface it.
       await queryClient.invalidateQueries({
         queryKey: ['tickets', 'timeline', ticketId],
       });
@@ -137,31 +159,11 @@ export const useCreateTicketInternalNote = (ticketId: string) => {
   });
 };
 
-export const useUploadTicketAttachment = (ticketId: string) =>
-  useMutation<TicketTimelineAttachment, Error, File>({
-    mutationFn: (file) => uploadTicketAttachment(ticketId, file),
-  });
-
 export const useTicketAttachmentDownloadUrl = (ticketId: string) =>
   useMutation<TicketAttachmentDownloadUrlResponse, Error, string>({
     mutationFn: (attachmentId) =>
       getTicketAttachmentDownloadUrl(ticketId, attachmentId),
   });
-
-const invalidateTicketWorkflowCaches = async (
-  queryClient: QueryClient,
-  ticketId: string,
-) => {
-  await Promise.all([
-    queryClient.invalidateQueries({
-      queryKey: ['tickets', 'detail', ticketId],
-    }),
-    queryClient.invalidateQueries({ queryKey: ['tickets', 'list'] }),
-    queryClient.invalidateQueries({
-      queryKey: ['tickets', 'timeline', ticketId],
-    }),
-  ]);
-};
 
 export const useUpdateTicketStatus = (ticketId: string) => {
   const queryClient = useQueryClient();

@@ -16,7 +16,20 @@ export class QueueService {
     @Optional()
     @InjectQueue(NOTIFICATIONS_QUEUE_NAME)
     private readonly notificationsQueue?: Queue<NotificationJobPayload>,
-  ) {}
+  ) {
+    // BullMQ re-emits ioredis connection errors on the Queue instance. Without
+    // a listener, an 'error' event on this EventEmitter would throw and crash
+    // the API process when Redis is unavailable. Logging keeps the process and
+    // all REST/WebSocket traffic alive while the queue degrades gracefully.
+    if (typeof this.notificationsQueue?.on === 'function') {
+      this.notificationsQueue.on('error', (error: Error) => {
+        this.logger.error({
+          event: 'notification.queue_error',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+  }
 
   async enqueueNotification(
     payload: NotificationJobPayload,

@@ -1,4 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject, Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
 
@@ -73,5 +73,29 @@ export class NotificationsProcessor extends WorkerHost {
       });
       throw error;
     }
+  }
+
+  @OnWorkerEvent('error')
+  onWorkerError(error: Error): void {
+    // The worker's underlying Redis connection can emit errors independently of
+    // any job. Logging them prevents an unhandled 'error' event from crashing
+    // the API process when Redis is unavailable.
+    this.logger.error({
+      event: 'notification.worker_error',
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  @OnWorkerEvent('failed')
+  onJobFailed(
+    job: Job<NotificationJobPayload> | undefined,
+    error: Error,
+  ): void {
+    this.logger.warn({
+      event: 'notification.job_failed_final',
+      jobId: job?.id,
+      attemptsMade: job?.attemptsMade,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }

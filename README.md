@@ -326,6 +326,8 @@ Frontend session state is derived from `/auth/me`, not from client-side token st
 - **M2**: Ticket core _(complete)_
 - **M3**: Conversation, internal notes, attachments _(complete)_
 - **M4**: Workflow actions, notifications, realtime _(complete)_
+- **M4.5**: Post-audit security/privacy/reliability hardening _(complete; no new product scope)_
+- **M4.6**: Pre-M5 hardening — atomic status transitions, CSRF Origin guard, JWT revocation (`tokenVersion`/`isActive`) _(complete; mechanism only, no admin endpoints)_
 - **M5**: SLA, dashboards, admin controls _(not started)_
 - **M6**: Testing hardening, polish, deployment _(not started)_
 

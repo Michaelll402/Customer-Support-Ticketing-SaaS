@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   HttpException,
   Inject,
@@ -190,6 +191,20 @@ const ALLOWED_STAFF_STATUS_TRANSITIONS: Record<
   [TicketStatus.CLOSED]: [TicketStatus.OPEN],
 };
 
+// Allow-list of system event types a customer may see on their own ticket
+// timeline. Anything not listed here (assignment, team transfer, tagging,
+// categorization, priority changes, internal notes/attachments) is internal
+// staff workflow and is filtered out at the query layer. Using an allow-list
+// keeps the filter fail-closed: any new event type is hidden from customers
+// until it is explicitly added here.
+const CUSTOMER_VISIBLE_TIMELINE_EVENT_TYPES: ReadonlyArray<TicketEventType> = [
+  TicketEventType.CREATED,
+  TicketEventType.STATUS_CHANGED,
+  TicketEventType.CLOSED_BY_CUSTOMER,
+  TicketEventType.REOPENED_BY_CUSTOMER,
+  TicketEventType.REPLIED,
+];
+
 const TICKET_ATTACHMENT_ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
   'image/gif',
@@ -251,8 +266,9 @@ export class TicketsService {
 
     const totalPages =
       totalItems === 0 ? 0 : Math.ceil(totalItems / query.limit);
+    const includeStaffEmail = viewer.role !== RoleName.CUSTOMER;
     const items = visibleTickets.map((ticket) =>
-      TicketListItemDto.fromRecord(ticket),
+      TicketListItemDto.fromRecord(ticket, includeStaffEmail),
     );
 
     return {
@@ -332,7 +348,8 @@ export class TicketsService {
       include: ticketDetailInclude,
     });
 
-    return TicketDetailDto.fromRecord(ticket);
+    // The creator is always a customer, so staff emails are withheld.
+    return TicketDetailDto.fromRecord(ticket, false);
   }
 
   private async resolveTeamIdForCategory(
@@ -461,7 +478,8 @@ export class TicketsService {
       include: ticketDetailInclude,
     });
 
-    return TicketDetailDto.fromRecord(updatedTicket);
+    // This narrow patch route is customer-only, so staff emails are withheld.
+    return TicketDetailDto.fromRecord(updatedTicket, false);
   }
 
   async createPublicReply(
@@ -579,10 +597,8 @@ export class TicketsService {
 
     if (viewer.role === RoleName.CUSTOMER) {
       messageWhere.isInternal = false;
-      eventWhere.NOT = {
-        type: {
-          in: [TicketEventType.NOTE_ADDED, TicketEventType.ATTACHMENT_ADDED],
-        },
+      eventWhere.type = {
+        in: [...CUSTOMER_VISIBLE_TIMELINE_EVENT_TYPES],
       };
     }
 
@@ -603,7 +619,12 @@ export class TicketsService {
       }),
     ]);
 
-    return TicketTimelineDto.fromRecords(visibleTicket.id, messages, events);
+    return TicketTimelineDto.fromRecords(
+      visibleTicket.id,
+      messages,
+      events,
+      viewer.role !== RoleName.CUSTOMER,
+    );
   }
 
   async uploadTicketAttachment(
@@ -727,7 +748,10 @@ export class TicketsService {
     });
 
     if (visibleTicket) {
-      return TicketDetailDto.fromRecord(visibleTicket);
+      return TicketDetailDto.fromRecord(
+        visibleTicket,
+        viewer.role !== RoleName.CUSTOMER,
+      );
     }
 
     const ticketExists = await this.prisma.ticket.findUnique({
@@ -869,39 +893,56 @@ export class TicketsService {
     }
 
     const eventId = randomUUID();
-    const updated = await this.prisma.ticket.update({
-      where: {
-        id: visibleTicket.id,
-      },
-      data: {
-        status: input.status,
-        events: {
-          create: {
-            id: eventId,
-            actorId: viewer.sub,
-            metadata: {
-              fromStatus,
-              toStatus: input.status,
-            },
-            type: TicketEventType.STATUS_CHANGED,
-          },
+
+    // Atomic guarded transition: the update only succeeds while the row is still
+    // in `fromStatus`, so two concurrent requests cannot both commit and produce
+    // an effective transition the matrix forbids. A zero count means another
+    // request changed the status first -> surface a 409 instead of writing a
+    // misleading TicketEvent.
+    await this.prisma.$transaction(async (tx) => {
+      const transition = await tx.ticket.updateMany({
+        where: {
+          id: visibleTicket.id,
+          status: fromStatus,
         },
-      },
-      include: ticketDetailInclude,
+        data: {
+          status: input.status,
+        },
+      });
+
+      if (transition.count === 0) {
+        throw new ConflictException(
+          'Ticket status changed concurrently. Reload the ticket and try again.',
+        );
+      }
+
+      await tx.ticketEvent.create({
+        data: {
+          id: eventId,
+          actorId: viewer.sub,
+          ticketId: visibleTicket.id,
+          metadata: {
+            fromStatus,
+            toStatus: input.status,
+          },
+          type: TicketEventType.STATUS_CHANGED,
+        },
+      });
     });
+
+    const dto = await this.loadTicketDetail(ticketId);
 
     await this.produceStatusChangeNotification({
       actorId: viewer.sub,
-      assigneeId: updated.assigneeId,
+      assigneeId: dto.assignee?.id ?? null,
       eventId,
       fromStatus,
-      requesterId: updated.requesterId,
-      ticketId: updated.id,
-      ticketNumber: updated.number,
+      requesterId: dto.requester.id,
+      ticketId: dto.id,
+      ticketNumber: dto.number,
       toStatus: input.status,
     });
 
-    const dto = TicketDetailDto.fromRecord(updated);
     this.emitTicketUpdatedFromDto(dto);
     return dto;
   }

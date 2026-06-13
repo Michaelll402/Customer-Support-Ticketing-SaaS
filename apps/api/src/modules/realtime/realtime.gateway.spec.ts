@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PrismaService } from '../../common/database/prisma.service';
 import type { AccessTokenPayload } from '../auth/auth.types';
+import type { UsersService } from '../users/users.service';
 import { ticketRoom, ticketStaffRoom, userRoom } from './realtime.constants';
 import { RealtimeGateway } from './realtime.gateway';
 
@@ -30,28 +31,54 @@ const validUser: AccessTokenPayload = {
   email: 'agent@example.test',
   role: RoleName.AGENT,
   sub: '00000000-0000-4000-8000-000000000001',
+  tokenVersion: 0,
 };
 
 const adminUser: AccessTokenPayload = {
   email: 'admin@example.test',
   role: RoleName.ADMIN,
   sub: '00000000-0000-4000-8000-000000000002',
+  tokenVersion: 0,
 };
 
 const customerUser: AccessTokenPayload = {
   email: 'customer@example.test',
   role: RoleName.CUSTOMER,
   sub: '00000000-0000-4000-8000-000000000003',
+  tokenVersion: 0,
 };
 
 const VALID_TICKET_ID = '00000000-0000-4000-8000-000000000010';
+
+// Minimal shape of the persisted user the gateway revalidates against.
+const buildDbUser = (
+  payload: AccessTokenPayload,
+  overrides: Partial<{
+    isActive: boolean;
+    role: RoleName;
+    tokenVersion: number;
+  }> = {},
+) => ({
+  id: payload.sub,
+  email: payload.email,
+  firstName: 'Test',
+  lastName: 'User',
+  isActive: overrides.isActive ?? true,
+  tokenVersion: overrides.tokenVersion ?? payload.tokenVersion,
+  role: {
+    id: 'role-test',
+    name: overrides.role ?? payload.role,
+  },
+});
 
 describe('RealtimeGateway', () => {
   let jwtService: JwtService;
   let configService: ConfigService;
   let prismaService: PrismaService;
+  let usersService: UsersService;
   let ticketFindFirst: ReturnType<typeof vi.fn>;
   let ticketFindUnique: ReturnType<typeof vi.fn>;
+  let userFindById: ReturnType<typeof vi.fn>;
   let verifyAsync: ReturnType<typeof vi.fn>;
   let gateway: RealtimeGateway;
 
@@ -68,7 +95,14 @@ describe('RealtimeGateway', () => {
     prismaService = {
       ticket: { findFirst: ticketFindFirst, findUnique: ticketFindUnique },
     } as unknown as PrismaService;
-    gateway = new RealtimeGateway(jwtService, configService, prismaService);
+    userFindById = vi.fn();
+    usersService = { findById: userFindById } as unknown as UsersService;
+    gateway = new RealtimeGateway(
+      jwtService,
+      configService,
+      prismaService,
+      usersService,
+    );
   });
 
   describe('handleConnection', () => {
@@ -85,16 +119,84 @@ describe('RealtimeGateway', () => {
       await gateway.handleConnection(socket as never);
       expect(socket.disconnect).toHaveBeenCalledWith(true);
       expect(socket.join).not.toHaveBeenCalled();
+      expect(userFindById).not.toHaveBeenCalled();
     });
 
     it('joins user:{sub} room on a valid handshake', async () => {
       const socket = buildSocket('access_token=valid');
       verifyAsync.mockResolvedValueOnce(validUser);
+      userFindById.mockResolvedValueOnce(buildDbUser(validUser));
       await gateway.handleConnection(socket as never);
+      expect(userFindById).toHaveBeenCalledWith(validUser.sub);
       expect(socket.data.user).toEqual(validUser);
       expect(socket.join).toHaveBeenCalledWith(userRoom(validUser.sub));
       expect(socket.disconnect).not.toHaveBeenCalled();
     });
+
+    it('disconnects when the user no longer exists', async () => {
+      const socket = buildSocket('access_token=valid');
+      verifyAsync.mockResolvedValueOnce(validUser);
+      userFindById.mockResolvedValueOnce(null);
+      await gateway.handleConnection(socket as never);
+      expect(socket.disconnect).toHaveBeenCalledWith(true);
+      expect(socket.join).not.toHaveBeenCalled();
+      expect(socket.data.user).toBeUndefined();
+    });
+
+    it('disconnects a deactivated user even with a valid token', async () => {
+      const socket = buildSocket('access_token=valid');
+      verifyAsync.mockResolvedValueOnce(validUser);
+      userFindById.mockResolvedValueOnce(
+        buildDbUser(validUser, { isActive: false }),
+      );
+      await gateway.handleConnection(socket as never);
+      expect(socket.disconnect).toHaveBeenCalledWith(true);
+      expect(socket.join).not.toHaveBeenCalled();
+      expect(socket.data.user).toBeUndefined();
+    });
+
+    it('disconnects when the token tokenVersion is stale', async () => {
+      const socket = buildSocket('access_token=valid');
+      verifyAsync.mockResolvedValueOnce(validUser);
+      userFindById.mockResolvedValueOnce(
+        buildDbUser(validUser, { tokenVersion: validUser.tokenVersion + 1 }),
+      );
+      await gateway.handleConnection(socket as never);
+      expect(socket.disconnect).toHaveBeenCalledWith(true);
+      expect(socket.join).not.toHaveBeenCalled();
+      expect(socket.data.user).toBeUndefined();
+    });
+
+    it('stores the fresh database role, not the stale token role', async () => {
+      const socket = buildSocket('access_token=valid');
+      // Token still claims AGENT, but the database says MANAGER.
+      verifyAsync.mockResolvedValueOnce(validUser);
+      userFindById.mockResolvedValueOnce(
+        buildDbUser(validUser, { role: RoleName.MANAGER }),
+      );
+      await gateway.handleConnection(socket as never);
+      expect(socket.data.user).toEqual({
+        ...validUser,
+        role: RoleName.MANAGER,
+      });
+      expect(socket.join).toHaveBeenCalledWith(userRoom(validUser.sub));
+      expect(socket.disconnect).not.toHaveBeenCalled();
+    });
+
+    it.each(['access_token=%ZZ', 'access_token=%E0%A4%A', 'access_token=%'])(
+      'disconnects without throwing for a malformed cookie %s',
+      async (cookie) => {
+        const socket = buildSocket(cookie);
+
+        await expect(
+          gateway.handleConnection(socket as never),
+        ).resolves.toBeUndefined();
+
+        expect(socket.disconnect).toHaveBeenCalledWith(true);
+        expect(verifyAsync).not.toHaveBeenCalled();
+        expect(socket.join).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('ticket.subscribe', () => {

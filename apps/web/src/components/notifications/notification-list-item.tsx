@@ -54,7 +54,7 @@ export const NotificationListItem = ({
       </div>
 
       <p
-        className={`text-sm leading-5 ${
+        className={`break-words text-sm leading-5 ${
           unread ? 'font-semibold text-slate-950' : 'text-slate-700'
         }`}
       >

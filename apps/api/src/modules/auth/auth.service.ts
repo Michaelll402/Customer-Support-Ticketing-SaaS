@@ -67,6 +67,13 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password.');
     }
 
+    // Deactivated accounts must not receive new sessions. Checked after the
+    // password verify and with the same uniform message so the response does
+    // not reveal whether the account exists or is merely deactivated.
+    if (!user.isActive) {
+      throw new UnauthorizedException('Invalid email or password.');
+    }
+
     return this.createSession(user);
   }
 
@@ -93,6 +100,7 @@ export class AuthService {
       email: user.email,
       role: user.role.name,
       sub: user.id,
+      tokenVersion: user.tokenVersion,
     };
 
     return {

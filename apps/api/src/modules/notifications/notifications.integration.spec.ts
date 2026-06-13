@@ -28,11 +28,19 @@ interface StoredUser {
   email: string;
   firstName: string;
   id: string;
+  isActive?: boolean;
   lastName: string;
   passwordHash: string;
   role: StoredRole;
   roleId: string;
+  tokenVersion?: number;
 }
+
+const withUserDefaults = (user: StoredUser) => ({
+  isActive: true,
+  tokenVersion: 0,
+  ...user,
+});
 
 interface StoredNotification {
   createdAt: Date;
@@ -236,15 +244,17 @@ const createPrismaMock = () => {
           email: data.email,
           firstName: data.firstName,
           id: randomUUID(),
+          isActive: true,
           lastName: data.lastName,
           passwordHash: data.passwordHash,
           role,
           roleId: role.id,
+          tokenVersion: 0,
         };
 
         users.push(user);
 
-        return user;
+        return withUserDefaults(user);
       },
     ),
     findUnique: vi.fn(
@@ -256,15 +266,14 @@ const createPrismaMock = () => {
           id?: string;
         };
       }) => {
-        if (where.email) {
-          return users.find((user) => user.email === where.email) ?? null;
-        }
+        const found =
+          (where.email
+            ? users.find((user) => user.email === where.email)
+            : where.id
+              ? users.find((user) => user.id === where.id)
+              : undefined) ?? null;
 
-        if (where.id) {
-          return users.find((user) => user.id === where.id) ?? null;
-        }
-
-        return null;
+        return found ? withUserDefaults(found) : null;
       },
     ),
   };

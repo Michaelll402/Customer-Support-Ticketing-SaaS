@@ -15,10 +15,12 @@ class TicketListUserSummaryDto {
   })
   id!: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    description:
+      'Email address. Omitted from customer-facing responses so staff contact details are not exposed.',
     example: 'agent@demo.test',
   })
-  email!: string;
+  email?: string;
 
   @ApiProperty({
     example: 'Avery',
@@ -30,12 +32,15 @@ class TicketListUserSummaryDto {
   })
   lastName!: string;
 
-  static fromUser(user: Pick<User, 'email' | 'firstName' | 'id' | 'lastName'>) {
+  static fromUser(
+    user: Pick<User, 'email' | 'firstName' | 'id' | 'lastName'>,
+    includeEmail: boolean,
+  ): TicketListUserSummaryDto {
     return {
       id: user.id,
-      email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
+      ...(includeEmail ? { email: user.email } : {}),
     };
   }
 }
@@ -133,7 +138,10 @@ export class TicketListItemDto {
   })
   updatedAt!: Date;
 
-  static fromRecord(record: TicketListRecord): TicketListItemDto {
+  static fromRecord(
+    record: TicketListRecord,
+    includeStaffEmail = true,
+  ): TicketListItemDto {
     return {
       id: record.id,
       number: record.number,
@@ -141,7 +149,7 @@ export class TicketListItemDto {
       status: record.status,
       priority: record.priority,
       assignee: record.assignee
-        ? TicketListUserSummaryDto.fromUser(record.assignee)
+        ? TicketListUserSummaryDto.fromUser(record.assignee, includeStaffEmail)
         : null,
       team: record.team ? TicketListTeamSummaryDto.fromTeam(record.team) : null,
       category: record.category

@@ -19,10 +19,12 @@ class TicketTimelineUserSummaryDto {
   })
   id!: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    description:
+      'Email address. Omitted from customer-facing timelines so staff contact details are not exposed.',
     example: 'agent@example.test',
   })
-  email!: string;
+  email?: string;
 
   @ApiProperty({
     example: 'Avery',
@@ -158,6 +160,7 @@ export class TicketTimelineDto {
     ticketId: string,
     messages: TicketTimelineMessageRecord[],
     events: TicketTimelineEventRecord[],
+    includeStaffEmail = true,
   ): TicketTimelineDto {
     const messageItems: TicketTimelineMessageItemDto[] = messages.map(
       (message) => ({
@@ -168,9 +171,9 @@ export class TicketTimelineDto {
         ticketId: message.ticketId,
         author: {
           id: message.author.id,
-          email: message.author.email,
           firstName: message.author.firstName,
           lastName: message.author.lastName,
+          ...(includeStaffEmail ? { email: message.author.email } : {}),
         },
         body: message.body,
         isInternal: message.isInternal,
@@ -191,9 +194,9 @@ export class TicketTimelineDto {
         actor: event.actor
           ? {
               id: event.actor.id,
-              email: event.actor.email,
               firstName: event.actor.firstName,
               lastName: event.actor.lastName,
+              ...(includeStaffEmail ? { email: event.actor.email } : {}),
             }
           : null,
         metadata: event.metadata,

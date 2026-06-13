@@ -2,6 +2,7 @@ import {
   Catch,
   HttpException,
   HttpStatus,
+  Logger,
   type ArgumentsHost,
   type ExceptionFilter,
 } from '@nestjs/common';
@@ -11,6 +12,8 @@ import type { ApiErrorPayload } from '@customer-support/types';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(HttpExceptionFilter.name);
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
@@ -21,7 +24,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    const message = this.extractMessage(exception);
+    if (status === HttpStatus.INTERNAL_SERVER_ERROR) {
+      // Log the real error (with stack) internally; the client only ever sees a
+      // generic message so raw Prisma/runtime details are never disclosed.
+      this.logger.error({
+        event: 'request.unhandled_error',
+        path: request.url,
+        error: exception instanceof Error ? exception.stack : String(exception),
+      });
+    }
+
+    const message = this.extractMessage(exception, status);
 
     const payload: ApiErrorPayload = {
       code:
@@ -37,7 +50,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     response.status(status).json(payload);
   }
 
-  private extractMessage(exception: unknown) {
+  private extractMessage(exception: unknown, status: number) {
     if (exception instanceof HttpException) {
       const response = exception.getResponse();
 
@@ -55,6 +68,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
       }
 
       return exception.message;
+    }
+
+    // Never surface raw messages from unexpected (non-HttpException) errors:
+    // they can leak Prisma constraint names, file paths, or internal details.
+    if (status === HttpStatus.INTERNAL_SERVER_ERROR) {
+      return 'An unexpected error occurred.';
     }
 
     if (exception instanceof Error) {

@@ -63,11 +63,8 @@ const formatDateTime = (value: string) =>
     timeStyle: 'short',
   }).format(new Date(value));
 
-const formatPersonName = (person: {
-  email: string;
-  firstName: string;
-  lastName: string;
-}) => `${person.firstName} ${person.lastName}`;
+const formatPersonName = (person: { firstName: string; lastName: string }) =>
+  `${person.firstName} ${person.lastName}`;
 
 const formatFileSize = (sizeBytes: number) => {
   if (sizeBytes < 1024) {
@@ -241,7 +238,9 @@ const TicketMetadata = ({ ticket }: { ticket: TicketDetailResponse }) => (
             <p className="font-semibold text-slate-950">
               {formatPersonName(ticket.requester)}
             </p>
-            <p className="text-slate-600">{ticket.requester.email}</p>
+            {ticket.requester.email ? (
+              <p className="text-slate-600">{ticket.requester.email}</p>
+            ) : null}
           </>
         }
       />
@@ -254,7 +253,9 @@ const TicketMetadata = ({ ticket }: { ticket: TicketDetailResponse }) => (
               <p className="font-semibold text-slate-950">
                 {formatPersonName(ticket.assignee)}
               </p>
-              <p className="text-slate-600">{ticket.assignee.email}</p>
+              {ticket.assignee.email ? (
+                <p className="text-slate-600">{ticket.assignee.email}</p>
+              ) : null}
             </>
           }
         />
@@ -448,17 +449,16 @@ const TimelineAttachmentList = ({
 
     try {
       const signedUrl = await downloadUrlMutation.mutateAsync(attachment.id);
-      const openedWindow = window.open(
-        signedUrl.url,
-        '_blank',
-        'noopener,noreferrer',
-      );
-
-      if (openedWindow) {
-        openedWindow.opener = null;
-      } else {
-        setDownloadError('The signed download URL was blocked by the browser.');
-      }
+      // Open the signed URL via a transient anchor instead of inspecting the
+      // window.open() return value: with `noopener` the browser returns null
+      // even on success, which previously surfaced a false "blocked" error.
+      const anchor = document.createElement('a');
+      anchor.href = signedUrl.url;
+      anchor.target = '_blank';
+      anchor.rel = 'noopener noreferrer';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
     } catch (error) {
       setDownloadError(
         getApiErrorMessage(error, 'The attachment download could not start.'),
@@ -526,7 +526,9 @@ const MessageTimelineItem = ({ item }: { item: TicketTimelineMessageItem }) => {
           <h3 className="mt-2 text-base font-semibold text-slate-950">
             {formatPersonName(item.author)}
           </h3>
-          <p className="mt-1 text-xs text-slate-500">{item.author.email}</p>
+          {item.author.email ? (
+            <p className="mt-1 text-xs text-slate-500">{item.author.email}</p>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {isInternal ? (
@@ -569,7 +571,8 @@ const SystemEventTimelineItem = ({
     </div>
     {item.actor ? (
       <p className="mt-3 text-sm text-slate-600">
-        Actor: {formatPersonName(item.actor)} ({item.actor.email})
+        Actor: {formatPersonName(item.actor)}
+        {item.actor.email ? ` (${item.actor.email})` : ''}
       </p>
     ) : (
       <p className="mt-3 text-sm text-slate-600">System-generated update.</p>

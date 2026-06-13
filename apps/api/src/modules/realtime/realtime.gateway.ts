@@ -16,6 +16,7 @@ import type { Server, Socket } from 'socket.io';
 import { buildAllowedOrigins } from '../../common/cors/build-allowed-origins';
 import { PrismaService } from '../../common/database/prisma.service';
 import type { AccessTokenPayload } from '../auth/auth.types';
+import { UsersService } from '../users/users.service';
 import { ticketRoom, ticketStaffRoom, userRoom } from './realtime.constants';
 import type { SubscribeAck } from './realtime.types';
 
@@ -40,7 +41,13 @@ const extractAccessTokenFromCookie = (
     const [name, ...valueParts] = cookie.trim().split('=');
 
     if (name === cookieName) {
-      return decodeURIComponent(valueParts.join('='));
+      try {
+        return decodeURIComponent(valueParts.join('='));
+      } catch {
+        // A malformed percent-encoded cookie (e.g. `access_token=%ZZ`) must
+        // never throw out of the handshake; treat it as an absent token.
+        return null;
+      }
     }
   }
 
@@ -68,26 +75,53 @@ export class RealtimeGateway
     @Inject(JwtService) private readonly jwtService: JwtService,
     @Inject(ConfigService) private readonly configService: ConfigService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(UsersService) private readonly usersService: UsersService,
   ) {}
 
   async handleConnection(client: AuthenticatedSocket): Promise<void> {
-    const cookieName = this.configService.getOrThrow<string>('auth.cookieName');
-    const token = extractAccessTokenFromCookie(
-      client.handshake.headers.cookie,
-      cookieName,
-    );
-
-    if (!token) {
-      client.disconnect(true);
-      return;
-    }
-
     try {
+      const cookieName =
+        this.configService.getOrThrow<string>('auth.cookieName');
+      const token = extractAccessTokenFromCookie(
+        client.handshake.headers.cookie,
+        cookieName,
+      );
+
+      if (!token) {
+        client.disconnect(true);
+        return;
+      }
+
       const payload =
         await this.jwtService.verifyAsync<AccessTokenPayload>(token);
-      client.data.user = payload;
-      await client.join(userRoom(payload.sub));
+
+      // Mirror the REST JwtStrategy: re-validate the token against the
+      // persisted user so revoked (tokenVersion bump), deactivated, or deleted
+      // users cannot open new sockets, and so room authorization uses the
+      // FRESH database role instead of the possibly stale token role.
+      const user = await this.usersService.findById(payload.sub);
+
+      if (
+        !user ||
+        !user.isActive ||
+        user.tokenVersion !== payload.tokenVersion
+      ) {
+        client.disconnect(true);
+        return;
+      }
+
+      client.data.user = {
+        email: user.email,
+        role: user.role.name,
+        sub: user.id,
+        tokenVersion: user.tokenVersion,
+      };
+      await client.join(userRoom(user.id));
     } catch {
+      // Any failure during the handshake (malformed cookie, invalid or expired
+      // token, DB lookup failure, room join error) disconnects the socket
+      // instead of escaping as an unhandled rejection that could crash the
+      // process.
       client.disconnect(true);
     }
   }

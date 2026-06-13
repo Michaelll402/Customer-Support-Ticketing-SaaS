@@ -39,6 +39,19 @@ No milestone may leave major half-built features behind.
 - **M2 is complete and closed.**
 - **M3 is complete and closed.**
 - **M4 is complete and closed.**
+- **M4.5 post-audit hardening is applied** (no new product scope): malformed-cookie
+  safety on the realtime handshake and REST JWT strategy, customer-facing privacy
+  serialization (staff emails and internal workflow events withheld from
+  customers), staff-only `GET /tickets/tags` and `GET /tickets/teams`, BullMQ
+  Redis-failure resilience (error listeners + bounded job options), robust
+  `MINIO_USE_SSL` boolean parsing, generic 500 responses, and frontend realtime
+  resubscribe / cache-invalidation / attachment-download fixes.
+- **M4.6 pre-M5 hardening is applied** (mechanism only, no admin endpoints):
+  atomic guarded staff status transitions (409 on concurrent change), a
+  dependency-free CSRF Origin/Referer guard on unsafe methods, and JWT
+  revocation via `User.tokenVersion` + `User.isActive` (the JWT strategy
+  re-validates against the database and returns the fresh role). Requires the
+  `user_active_token_version` Prisma migration.
 - **M5 has not started yet.** The next implementation step is focused M5 spec extraction.
 - The database/backend M1 lean-auth slice is implemented:
   - `DB-01` - Identity schema for `Role` and `User`

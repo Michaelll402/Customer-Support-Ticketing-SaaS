@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 
 import {
@@ -12,13 +13,21 @@ import type { NotificationItem } from '@/lib/notifications';
 
 import { NotificationDropdown } from './notification-dropdown';
 
+const NOTIFICATIONS_PANEL_ID = 'notifications-panel';
+
 const formatBadgeCount = (count: number): string =>
   count > 99 ? '99+' : String(count);
 
 export const NotificationBell = () => {
   const router = useRouter();
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
+  const [panelPosition, setPanelPosition] = useState<{
+    right: number;
+    top: number;
+  }>({ right: 16, top: 80 });
 
   const notificationsQuery = useNotifications({ limit: 10, page: 1 });
   const markReadMutation = useMarkNotificationRead();
@@ -26,28 +35,75 @@ export const NotificationBell = () => {
 
   const unreadCount = notificationsQuery.data?.unreadCount ?? 0;
 
+  // Anchor the portaled (fixed) panel to the bell button's bottom-right.
+  const updatePanelPosition = useCallback(() => {
+    const button = buttonRef.current;
+    if (!button) return;
+    const rect = button.getBoundingClientRect();
+    setPanelPosition({
+      right: Math.max(window.innerWidth - rect.right, 8),
+      top: rect.bottom + 8,
+    });
+  }, []);
+
+  // Keep the panel anchored while it is open (page scroll, viewport resize).
   useEffect(() => {
     if (!open) return;
 
-    const handleClick = (event: MouseEvent) => {
-      if (!wrapperRef.current) return;
-      if (wrapperRef.current.contains(event.target as Node)) return;
+    updatePanelPosition();
+    window.addEventListener('scroll', updatePanelPosition, true);
+    window.addEventListener('resize', updatePanelPosition);
+    return () => {
+      window.removeEventListener('scroll', updatePanelPosition, true);
+      window.removeEventListener('resize', updatePanelPosition);
+    };
+  }, [open, updatePanelPosition]);
+
+  // Move keyboard focus into the panel once the portal has mounted.
+  useEffect(() => {
+    if (!open) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      panelRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
+
+  // Close on outside click (button wrapper or the portaled panel) and Escape.
+  useEffect(() => {
+    if (!open) return;
+
+    const handlePointer = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (wrapperRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
       setOpen(false);
     };
 
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setOpen(false);
+        buttonRef.current?.focus();
       }
     };
 
-    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('mousedown', handlePointer);
     document.addEventListener('keydown', handleKey);
     return () => {
-      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('mousedown', handlePointer);
       document.removeEventListener('keydown', handleKey);
     };
   }, [open]);
+
+  const handleToggle = () => {
+    const next = !open;
+    if (next) {
+      // Measure before the portal paints so the panel never flashes at a stale
+      // position.
+      updatePanelPosition();
+    }
+    setOpen(next);
+  };
 
   const handleItemClick = (item: NotificationItem) => {
     if (!item.isRead) {
@@ -67,6 +123,7 @@ export const NotificationBell = () => {
   return (
     <div className="relative" ref={wrapperRef}>
       <button
+        aria-controls={open ? NOTIFICATIONS_PANEL_ID : undefined}
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-label={
@@ -75,7 +132,8 @@ export const NotificationBell = () => {
             : 'Notifications'
         }
         className="relative inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-        onClick={() => setOpen((current) => !current)}
+        onClick={handleToggle}
+        ref={buttonRef}
         type="button"
       >
         <svg
@@ -95,28 +153,39 @@ export const NotificationBell = () => {
         {unreadCount > 0 ? (
           <span
             aria-hidden="true"
-            className="absolute -right-1 -top-1 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm"
+            className="absolute -right-1 -top-1 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white shadow-sm"
           >
             {formatBadgeCount(unreadCount)}
           </span>
         ) : null}
       </button>
 
-      {open ? (
-        <NotificationDropdown
-          data={notificationsQuery.data}
-          error={notificationsQuery.error}
-          isError={notificationsQuery.isError}
-          isLoading={notificationsQuery.isLoading}
-          isMarkAllPending={markAllReadMutation.isPending}
-          isMarkSinglePending={markReadMutation.isPending}
-          onItemClick={handleItemClick}
-          onMarkAllRead={handleMarkAllRead}
-          onRetry={() => {
-            void notificationsQuery.refetch();
-          }}
-        />
-      ) : null}
+      {open && typeof document !== 'undefined'
+        ? createPortal(
+            <NotificationDropdown
+              data={notificationsQuery.data}
+              error={notificationsQuery.error}
+              id={NOTIFICATIONS_PANEL_ID}
+              isError={notificationsQuery.isError}
+              isLoading={notificationsQuery.isLoading}
+              isMarkAllPending={markAllReadMutation.isPending}
+              isMarkSinglePending={markReadMutation.isPending}
+              onItemClick={handleItemClick}
+              onMarkAllRead={handleMarkAllRead}
+              onRetry={() => {
+                void notificationsQuery.refetch();
+              }}
+              ref={panelRef}
+              style={{
+                position: 'fixed',
+                right: `${panelPosition.right}px`,
+                top: `${panelPosition.top}px`,
+                zIndex: 50,
+              }}
+            />,
+            document.body,
+          )
+        : null}
     </div>
   );
 };

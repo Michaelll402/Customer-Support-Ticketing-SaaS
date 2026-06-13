@@ -44,11 +44,19 @@ interface StoredUser {
   email: string;
   firstName: string;
   id: string;
+  isActive?: boolean;
   lastName: string;
   passwordHash: string;
   role: StoredRole;
   roleId: string;
+  tokenVersion?: number;
 }
+
+const withUserDefaults = (user: StoredUser) => ({
+  isActive: true,
+  tokenVersion: 0,
+  ...user,
+});
 
 interface MockUserCreateArgs {
   data: {
@@ -95,26 +103,27 @@ const createPrismaMock = () => {
           email: data.email,
           firstName: data.firstName,
           id: randomUUID(),
+          isActive: true,
           lastName: data.lastName,
           passwordHash: data.passwordHash,
           role,
           roleId: role.id,
+          tokenVersion: 0,
         };
 
         users.push(user);
 
-        return user;
+        return withUserDefaults(user);
       }),
       findUnique: vi.fn(async ({ where }: MockUserFindUniqueArgs) => {
-        if (where.email) {
-          return users.find((user) => user.email === where.email) ?? null;
-        }
+        const found =
+          (where.email
+            ? users.find((user) => user.email === where.email)
+            : where.id
+              ? users.find((user) => user.id === where.id)
+              : undefined) ?? null;
 
-        if (where.id) {
-          return users.find((user) => user.id === where.id) ?? null;
-        }
-
-        return null;
+        return found ? withUserDefaults(found) : null;
       }),
     },
   };
@@ -290,5 +299,124 @@ describe('Auth integration', () => {
       .expect(201);
 
     await agent.get('/test-auth/manager-only').expect(403);
+  });
+
+  const seedAgent = async (email: string): Promise<StoredUser> => {
+    const agentRole = prismaMock.roleStore.find(
+      (role) => role.name === RoleName.AGENT,
+    );
+
+    if (!agentRole) {
+      throw new Error('Agent role missing from test store.');
+    }
+
+    const storedUser: StoredUser = {
+      email,
+      firstName: 'Avery',
+      id: randomUUID(),
+      lastName: 'Agent',
+      passwordHash: await hash('Password1!', 12),
+      role: agentRole,
+      roleId: agentRole.id,
+    };
+
+    prismaMock.userStore.push(storedUser);
+
+    return storedUser;
+  };
+
+  it('rejects a valid token whose user no longer exists', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const storedUser = await seedAgent('ghost@demo.test');
+
+    await agent
+      .post('/auth/login')
+      .send({ email: 'ghost@demo.test', password: 'Password1!' })
+      .expect(200);
+    await agent.get('/auth/me').expect(200);
+
+    const index = prismaMock.userStore.indexOf(storedUser);
+    prismaMock.userStore.splice(index, 1);
+
+    await agent.get('/auth/me').expect(401);
+  });
+
+  it('returns 401 when a deactivated user attempts to log in', async () => {
+    const storedUser = await seedAgent('inactive-login@demo.test');
+    storedUser.isActive = false;
+
+    const response = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'inactive-login@demo.test', password: 'Password1!' })
+      .expect(401);
+
+    expect(response.body.message).toBe('Invalid email or password.');
+    expect(response.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('rejects an authenticated request once the user is deactivated', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const storedUser = await seedAgent('deactivate@demo.test');
+
+    await agent
+      .post('/auth/login')
+      .send({ email: 'deactivate@demo.test', password: 'Password1!' })
+      .expect(200);
+    await agent.get('/auth/me').expect(200);
+
+    storedUser.isActive = false;
+
+    await agent.get('/auth/me').expect(401);
+  });
+
+  it('rejects a token whose tokenVersion is stale', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const storedUser = await seedAgent('revoke@demo.test');
+
+    await agent
+      .post('/auth/login')
+      .send({ email: 'revoke@demo.test', password: 'Password1!' })
+      .expect(200);
+    await agent.get('/auth/me').expect(200);
+
+    storedUser.tokenVersion = 1;
+
+    await agent.get('/auth/me').expect(401);
+  });
+
+  it('authorizes against the fresh database role, not the stale token role', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const customerRole = prismaMock.roleStore.find(
+      (role) => role.name === RoleName.CUSTOMER,
+    )!;
+    const managerRole = prismaMock.roleStore.find(
+      (role) => role.name === RoleName.MANAGER,
+    )!;
+    const storedUser: StoredUser = {
+      email: 'promote@demo.test',
+      firstName: 'Pat',
+      id: randomUUID(),
+      lastName: 'Customer',
+      passwordHash: await hash('Password1!', 12),
+      role: customerRole,
+      roleId: customerRole.id,
+    };
+    prismaMock.userStore.push(storedUser);
+
+    await agent
+      .post('/auth/login')
+      .send({ email: 'promote@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    // The token was issued with the CUSTOMER role.
+    await agent.get('/test-auth/manager-only').expect(403);
+
+    // Promote the user in the database without re-issuing the token.
+    storedUser.role = managerRole;
+    storedUser.roleId = managerRole.id;
+
+    // The same cookie now authorizes as MANAGER because validate() reads the
+    // fresh database role.
+    await agent.get('/test-auth/manager-only').expect(200);
   });
 });

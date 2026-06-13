@@ -128,7 +128,8 @@ export const ticketCategoryListResponseSchema = z.array(
 
 const ticketListUserSummarySchema = z.object({
   id: z.string().min(1),
-  email: z.string().email(),
+  // Omitted for staff users in customer-facing responses (privacy hardening).
+  email: z.string().email().optional(),
   firstName: z.string().min(1),
   lastName: z.string().min(1),
 });
@@ -178,7 +179,8 @@ export type TicketListResponse = z.infer<typeof ticketListResponseSchema>;
 
 const ticketDetailUserSummarySchema = z.object({
   id: z.string().min(1),
-  email: z.string().email(),
+  // Omitted for staff users in customer-facing responses (privacy hardening).
+  email: z.string().email().optional(),
   firstName: z.string().min(1),
   lastName: z.string().min(1),
 });
@@ -224,7 +226,8 @@ export type TicketDetailResponse = z.infer<typeof ticketDetailResponseSchema>;
 
 const ticketTimelineUserSummarySchema = z.object({
   id: z.string().min(1),
-  email: z.string().email(),
+  // Omitted for staff users in customer-facing timelines (privacy hardening).
+  email: z.string().email().optional(),
   firstName: z.string().min(1),
   lastName: z.string().min(1),
 });
