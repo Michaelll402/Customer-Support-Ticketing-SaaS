@@ -26,6 +26,7 @@
     "@nestjs/platform-express": "^10.4.15",
     "@nestjs/platform-socket.io": "^10.4.15",
     "@nestjs/swagger": "^7.4.2",
+    "@nestjs/throttler": "6",
     "@nestjs/websockets": "^10.4.15",
     "@prisma/client": "^6.5.0",
     "bcryptjs": "2.4.3",

@@ -732,7 +732,9 @@ export class TicketsService {
       }
     }
 
-    return this.storage.getSignedUrl(attachment.storedKey);
+    return this.storage.getSignedUrl(attachment.storedKey, {
+      downloadFilename: attachment.filename,
+    });
   }
 
   async getTicketById(

@@ -3730,6 +3730,7 @@ describe('Tickets integration', () => {
     });
     expect(storageMock.getSignedUrl).toHaveBeenCalledWith(
       `tickets/${ownTicket.id}/attachments/visible.txt`,
+      { downloadFilename: 'visible.txt' },
     );
   });
 
@@ -3833,6 +3834,7 @@ describe('Tickets integration', () => {
     });
     expect(storageMock.getSignedUrl).toHaveBeenCalledWith(
       `tickets/${teamTicket.id}/attachments/staff-diagnostics.txt`,
+      { downloadFilename: 'staff-diagnostics.txt' },
     );
   });
 

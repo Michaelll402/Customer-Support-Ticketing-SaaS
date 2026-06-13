@@ -7,6 +7,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger } from 'nestjs-pino';
 
 import { AppModule } from './app.module';
+import { shouldExposeSwagger } from './common/config/swagger';
 import { buildAllowedOrigins } from './common/cors/build-allowed-origins';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { CsrfOriginGuard } from './common/security/csrf-origin.guard';
@@ -39,32 +40,41 @@ const bootstrap = async () => {
   // sending an authenticated cross-site write, so validate Origin/Referer too.
   app.useGlobalGuards(new CsrfOriginGuard(configService));
 
-  const swaggerDocument = SwaggerModule.createDocument(
-    app,
-    new DocumentBuilder()
-      .setTitle('Customer Support Ticketing SaaS API')
-      .setDescription(
-        'Customer Support / Ticketing SaaS API. Auth, ticket core, conversation, internal notes, attachments, workflow actions, in-app notifications, and the Socket.IO realtime gateway are implemented. SLA logic, dashboards, admin CRUD, audit log, email inbox sync, chatbot, and billing remain deferred.',
-      )
-      .setVersion('0.1.0')
-      .addCookieAuth(
-        authCookieName,
-        {
-          in: 'cookie',
-          name: authCookieName,
-          type: 'apiKey',
-        },
-        AUTH_COOKIE_SECURITY_NAME,
-      )
-      .build(),
-  );
+  const appEnv = configService.getOrThrow<string>('app.env');
 
-  SwaggerModule.setup(swaggerPath, app, swaggerDocument);
+  // Swagger is not served in production so the full API surface and DTO shapes
+  // are not publicly disclosed.
+  if (shouldExposeSwagger(appEnv)) {
+    const swaggerDocument = SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder()
+        .setTitle('Customer Support Ticketing SaaS API')
+        .setDescription(
+          'Customer Support / Ticketing SaaS API. Auth, ticket core, conversation, internal notes, attachments, workflow actions, in-app notifications, and the Socket.IO realtime gateway are implemented. SLA logic, dashboards, admin CRUD, audit log, email inbox sync, chatbot, and billing remain deferred.',
+        )
+        .setVersion('0.1.0')
+        .addCookieAuth(
+          authCookieName,
+          {
+            in: 'cookie',
+            name: authCookieName,
+            type: 'apiKey',
+          },
+          AUTH_COOKIE_SECURITY_NAME,
+        )
+        .build(),
+    );
+
+    SwaggerModule.setup(swaggerPath, app, swaggerDocument);
+  }
 
   await app.listen(port, host);
 
   logger.log(`API listening on http://${host}:${port}`);
-  logger.log(`Swagger available on http://${host}:${port}/${swaggerPath}`);
+
+  if (shouldExposeSwagger(appEnv)) {
+    logger.log(`Swagger available on http://${host}:${port}/${swaggerPath}`);
+  }
 };
 
 void bootstrap();

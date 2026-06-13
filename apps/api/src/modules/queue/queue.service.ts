@@ -31,6 +31,17 @@ export class QueueService {
     }
   }
 
+  /**
+   * Synchronous, network-free availability report for readiness probes:
+   * 'configured' when the BullMQ queue is wired (production/dev), 'disabled'
+   * when it is not (test env, or a deployment with no queue). It intentionally
+   * does not probe Redis so the readiness endpoint cannot hang or leak infra
+   * errors.
+   */
+  getAvailability(): 'configured' | 'disabled' {
+    return this.notificationsQueue ? 'configured' : 'disabled';
+  }
+
   async enqueueNotification(
     payload: NotificationJobPayload,
     jobId?: string,

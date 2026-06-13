@@ -50,6 +50,22 @@ const formatAmzDate = (date: Date) =>
 const formatDateStamp = (date: Date) =>
   date.toISOString().slice(0, 10).replace(/-/g, '');
 
+const buildContentDisposition = (filename: string): string => {
+  // RFC 6266: a quoted ASCII fallback (control characters, quotes, and
+  // backslashes neutralized) plus an RFC 5987 UTF-8 parameter so non-ASCII
+  // names survive. The whole value is signed and returned by storage as the
+  // response Content-Disposition header.
+  const asciiFallback =
+    filename
+      .replace(/[^\x20-\x7e]/g, '_')
+      .replace(/["\\]/g, '_')
+      .trim() || 'download';
+
+  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(
+    filename,
+  )}`;
+};
+
 @Injectable()
 export class StorageService {
   constructor(
@@ -86,27 +102,44 @@ export class StorageService {
     };
   }
 
-  async getSignedUrl(key: string): Promise<StorageSignedUrlResult> {
+  async getSignedUrl(
+    key: string,
+    options: { downloadFilename?: string } = {},
+  ): Promise<StorageSignedUrlResult> {
     const config = this.getConfig();
     const now = new Date();
-    const url = new URL(this.buildObjectUrl(config, key));
+    const objectPath = this.buildObjectPath(config.bucket, key);
+    const host = this.buildHost(config);
+    const protocol = config.useSsl ? 'https' : 'http';
     const amzDate = formatAmzDate(now);
     const dateStamp = formatDateStamp(now);
     const credentialScope = `${dateStamp}/${S3_REGION}/${S3_SERVICE}/aws4_request`;
     const credential = `${config.accessKey}/${credentialScope}`;
     const signedHeaders = 'host';
 
-    url.searchParams.set('X-Amz-Algorithm', S3_ALGORITHM);
-    url.searchParams.set('X-Amz-Credential', credential);
-    url.searchParams.set('X-Amz-Date', amzDate);
-    url.searchParams.set('X-Amz-Expires', String(SIGNED_URL_EXPIRES_SECONDS));
-    url.searchParams.set('X-Amz-SignedHeaders', signedHeaders);
+    const queryParams: Array<[string, string]> = [
+      ['X-Amz-Algorithm', S3_ALGORITHM],
+      ['X-Amz-Credential', credential],
+      ['X-Amz-Date', amzDate],
+      ['X-Amz-Expires', String(SIGNED_URL_EXPIRES_SECONDS)],
+      ['X-Amz-SignedHeaders', signedHeaders],
+    ];
+
+    if (options.downloadFilename) {
+      // Signed response override so storage returns `Content-Disposition:
+      // attachment`, forcing a download instead of inline rendering and
+      // mitigating stored-XSS via attacker-controlled file content.
+      queryParams.push([
+        'response-content-disposition',
+        buildContentDisposition(options.downloadFilename),
+      ]);
+    }
 
     const canonicalRequest = [
       'GET',
-      this.buildObjectPath(config.bucket, key),
-      this.canonicalQueryString(url.searchParams),
-      `host:${this.buildHost(config)}\n`,
+      objectPath,
+      this.canonicalQueryString(queryParams),
+      `host:${host}\n`,
       signedHeaders,
       'UNSIGNED-PAYLOAD',
     ].join('\n');
@@ -118,11 +151,17 @@ export class StorageService {
     ].join('\n');
     const signature = this.sign(stringToSign, dateStamp, config.secretKey);
 
-    url.searchParams.set('X-Amz-Signature', signature);
+    // Build the returned URL with the SAME encoder and ordering used for the
+    // signature so the request query string matches the signed canonical query
+    // byte-for-byte (URLSearchParams form-encoding would diverge on spaces).
+    const finalQuery = this.canonicalQueryString([
+      ...queryParams,
+      ['X-Amz-Signature', signature],
+    ]);
 
     return {
       expiresInSeconds: SIGNED_URL_EXPIRES_SECONDS,
-      url: url.toString(),
+      url: `${protocol}://${host}${objectPath}?${finalQuery}`,
     };
   }
 
@@ -248,13 +287,18 @@ export class StorageService {
     };
   }
 
-  private canonicalQueryString(searchParams: URLSearchParams) {
-    return [...searchParams.entries()]
-      .sort(([leftKey, leftValue], [rightKey, rightValue]) =>
-        leftKey === rightKey
-          ? leftValue.localeCompare(rightValue)
-          : leftKey.localeCompare(rightKey),
-      )
+  private canonicalQueryString(
+    entries: ReadonlyArray<readonly [string, string]>,
+  ): string {
+    // AWS SigV4 requires the query parameters sorted by code point (byte
+    // order), not locale order, and each key/value RFC-3986 percent-encoded.
+    return [...entries]
+      .sort((left, right) => {
+        if (left[0] !== right[0]) {
+          return left[0] < right[0] ? -1 : 1;
+        }
+        return left[1] < right[1] ? -1 : left[1] > right[1] ? 1 : 0;
+      })
       .map(
         ([key, value]) => `${encodeQueryValue(key)}=${encodeQueryValue(value)}`,
       )
