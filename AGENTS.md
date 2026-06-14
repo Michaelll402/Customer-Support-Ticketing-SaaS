@@ -102,8 +102,19 @@ Read these files before making changes:
     use a slim in-memory aggregation (ids + timestamps + states only — no PII).
     Privacy: no descriptions, emails, message content, request reasons, or review
     notes. Frontend dashboard deferred.
-  - Remaining slices (reports dashboard UI, admin CRUD, audit read surface, SLA
-    indicator UI) are pending.
+  - Slice 4 (admin user management + audit read, backend + frontend) is
+    implemented. No schema change/migration. `AdminModule` (`@Roles(ADMIN)`):
+    `GET/POST /admin/users`, `GET/PATCH /admin/users/:id`,
+    `PATCH /admin/users/:id/role|status|teams`,
+    `POST /admin/users/:id/revoke-sessions`, `GET /admin/audit` (filterable,
+    newest-first). Role-change/deactivate/revoke bump `tokenVersion` (revoke
+    sessions); deactivate flips `isActive`. Last active admin cannot be
+    demoted/deactivated (409); no self-deactivation (400). Every mutation writes
+    an `AuditLog`; responses omit `passwordHash`/`tokenVersion`. Frontend
+    (admin-only): `/settings/users` (responsive table + create + per-user manage
+    dialog, severity-coded, RHF+Zod) and `/settings/audit` (filterable table with
+    readable metadata expansion + copyable IDs), built per `design-system/`.
+  - Remaining slices (reports dashboard UI, SLA indicator UI) are pending.
 - M1 delivered:
   - `DB-01` identity schema for `Role` and `User`
   - `BE-01` lean auth foundation: register, login, logout, `/auth/me`, JWT cookie auth,

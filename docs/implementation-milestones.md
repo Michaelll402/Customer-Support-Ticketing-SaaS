@@ -166,8 +166,27 @@ No milestone may leave major half-built features behind.
       counts, and timestamps only — no descriptions, requester emails, message
       content, request reasons, or review notes. **The frontend dashboard remains
       deferred.**
-  - **Remaining M5 slices are pending:** reports dashboard UI, admin CRUD, the
-    admin/audit read surfaces, and the SLA indicator UI.
+  - **Slice 4 (admin user management + audit read, backend + frontend) is
+    implemented.** **No schema change/migration** (reuses `User`, `TeamMember`,
+    `AuditLog`). Backend `AdminModule` (admin-only, `@Roles(ADMIN)`):
+    `GET/POST /admin/users`, `GET/PATCH /admin/users/:id`,
+    `PATCH /admin/users/:id/role|status|teams`,
+    `POST /admin/users/:id/revoke-sessions`, and `GET /admin/audit` (newest-first,
+    filterable by actor/action/target/date). **Session model:** role change,
+    deactivate, and revoke-sessions bump `User.tokenVersion` (the JWT strategy
+    rejects stale tokens); deactivate also flips `isActive`. **Safeguards:** the
+    last active admin cannot be demoted or deactivated (409), and admins cannot
+    deactivate themselves (400). Every mutation writes an `AuditLog` row with safe
+    metadata (never passwords/tokens). Responses omit `passwordHash`/`tokenVersion`.
+    Frontend (admin-only): `/settings/users` (searchable/filterable responsive
+    user table with create + a per-user management dialog covering edit/role/teams/
+    revoke/deactivate/activate, severity-coded, RHF+Zod, last-admin-aware) and
+    `/settings/audit` (filterable newest-first table with readable key/value
+    metadata expansion and copyable IDs). Built per the project design system
+    (conservative slate/navy, accessible dialogs, responsive table→cards). The
+    reports dashboard UI and SLA indicator UI remain deferred.
+  - **Remaining M5 slices are pending:** the reports dashboard UI and the SLA
+    indicator UI.
 - The database/backend M1 lean-auth slice is implemented:
   - `DB-01` - Identity schema for `Role` and `User`
   - `BE-01` - Auth endpoints, JWT cookie auth, role guards, seed roles/users, backend tests

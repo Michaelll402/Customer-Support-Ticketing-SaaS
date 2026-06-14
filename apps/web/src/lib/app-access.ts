@@ -6,6 +6,8 @@ export const appRoutePaths = [
   '/tickets/trash',
   '/assignment-requests',
   '/settings',
+  '/settings/users',
+  '/settings/audit',
   '/profile',
 ] as const;
 

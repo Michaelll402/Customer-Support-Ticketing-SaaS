@@ -24,6 +24,10 @@ const appRouteDescriptions: Record<AppRoutePath, string> = {
     'Admin-only trash: review soft-deleted tickets and restore them with their full conversation, workflow, and SLA history intact.',
   '/assignment-requests':
     'Manager/admin review queue for agent reassignment requests: approve to apply the change or decline to keep the current assignee.',
+  '/settings/users':
+    'Admin user management: create accounts, change roles and team membership, deactivate/activate, and revoke sessions.',
+  '/settings/audit':
+    'Admin audit log: a newest-first, filterable record of administrative and workflow actions for traceability.',
 };
 
 const appRouteLabelsByRole: Record<
@@ -33,10 +37,11 @@ const appRouteLabelsByRole: Record<
   ADMIN: {
     '/dashboard': 'Dashboard',
     '/profile': 'Profile',
-    '/settings': 'Settings',
     '/tickets': 'Ticket Queue',
     '/tickets/trash': 'Trash',
     '/assignment-requests': 'Assignment requests',
+    '/settings/users': 'Users',
+    '/settings/audit': 'Audit log',
   },
   AGENT: {
     '/profile': 'Profile',
