@@ -3,6 +3,7 @@
 import type { UserRole } from '@/lib/auth';
 import type { TicketDetailResponse } from '@/lib/tickets';
 
+import { AgentAssignmentControl } from './agent-assignment-control';
 import { AssigneeSelector } from './assignee-selector';
 import { CategoryControl } from './category-control';
 import { PriorityControl } from './priority-control';
@@ -25,6 +26,9 @@ export const TicketWorkflowPanel = ({
   }
 
   const canTransferTeam = teamTransferRoles.includes(currentUserRole);
+  // Agents cannot directly reassign: they claim unassigned tickets or submit an
+  // approval request. Managers/admins keep the direct assignee dropdown.
+  const isAgent = currentUserRole === 'AGENT';
 
   return (
     <section
@@ -46,7 +50,11 @@ export const TicketWorkflowPanel = ({
       <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <StatusControl ticket={ticket} />
         <PriorityControl ticket={ticket} />
-        <AssigneeSelector ticket={ticket} />
+        {isAgent ? (
+          <AgentAssignmentControl ticket={ticket} />
+        ) : (
+          <AssigneeSelector ticket={ticket} />
+        )}
         <CategoryControl ticket={ticket} />
         <TagSelector ticket={ticket} />
         {canTransferTeam ? <TeamTransferControl ticket={ticket} /> : null}

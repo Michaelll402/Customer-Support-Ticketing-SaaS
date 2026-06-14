@@ -95,6 +95,7 @@ The backend is a modular monolith. Milestone 0 established the repo foundation, 
 - `PATCH /tickets/:id/team` (staff workflow; emits `TEAM_TRANSFERRED` ticket event)
 - `GET /tickets/tags`, `GET /tickets/teams`, `GET /tickets/:id/assignable-users` (read-only workflow options for staff)
 - `DELETE /tickets/:id`, `POST /tickets/:id/restore`, `GET /tickets/trash` (admin-only ticket trash: reversible soft delete + restore; trashed tickets are hidden from every role's list/detail/mutations and from the SLA scanner; trash/restore write `AuditLog` rows and emit `ticket.updated`; permanent hard delete is deferred — see `docs/ticket-trash-and-permanent-purge.md`)
+- Agent reassignment approval workflow (`AssignmentRequest`): agents may only claim an unassigned same-team ticket for themselves; any other direct reassign/return is `403` and must go through a request. `POST /tickets/:id/assignment-requests` (agent; same-team REASSIGN_USER or RETURN_TO_QUEUE), `DELETE /tickets/:ticketId/assignment-requests/:requestId` (cancel own pending), `GET /tickets/:id/assignment-requests` (staff, scoped), `GET /assignment-requests` (manager/admin review queue), `PATCH /assignment-requests/:id/approve|reject` (manager/admin; transactional with state revalidation → 409 on stale state). The ticket stays assigned until approval; approval replaces the single assignee and emits a `REASSIGNED` event; AuditLog + staff notifications throughout; customers never see requests/reasons/notes/notifications. Cross-team requests deferred.
 - `GET /notifications`, `PATCH /notifications/:id/read`, `PATCH /notifications/read-all`
 - BullMQ notification queue producer (Redis-backed, skipped in test env, idempotent jobIds, REST never blocks on queue failures)
 - Socket.IO realtime gateway with JWT-cookie handshake, `user:{id}` / `ticket:{id}` / `ticket:{id}:staff` rooms, and four server events (`notification.created`, `ticket.updated`, `ticket.message.created.public`, `ticket.message.created.internal`); customers never join staff rooms
@@ -291,6 +292,12 @@ Available now:
 - `POST /tickets/:id/attachments`
 - `GET /tickets/:ticketId/attachments/:attachmentId/download-url`
 - `GET /tickets/:id/timeline`
+- `POST /tickets/:id/assignment-requests` (agent only)
+- `DELETE /tickets/:ticketId/assignment-requests/:requestId` (agent; cancel own)
+- `GET /tickets/:id/assignment-requests` (staff; scoped)
+- `GET /assignment-requests` (manager/admin review queue)
+- `PATCH /assignment-requests/:id/approve` (manager/admin)
+- `PATCH /assignment-requests/:id/reject` (manager/admin)
 - `GET /notifications`
 - `PATCH /notifications/:id/read`
 - `PATCH /notifications/read-all`

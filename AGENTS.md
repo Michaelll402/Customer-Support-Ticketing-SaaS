@@ -72,6 +72,24 @@ Read these files before making changes:
     (`resolveTeamNameForCategory`, exported and unit-tested), falling back to
     `teamId: null` (manager triage) when the team is absent. The `@demo.test`
     accounts and legacy `Billing` team are untouched.
+  - Slice 2.6 (agent reassignment approval workflow) is implemented: an
+    `AssignmentRequest` model + `AssignmentRequestType`/`AssignmentRequestStatus`
+    enums + three additive `NotificationType` values (additive
+    `20260614120000_assignment_requests` migration, not applied to Neon). Policy:
+    AGENT may only claim an unassigned same-team ticket for themselves
+    (`PATCH /tickets/:id/assign` to self); any other agent direct
+    reassign/steal/return is 403 and must use a request. New `AssignmentRequestsModule`
+    (`POST /tickets/:id/assignment-requests`, `DELETE .../:requestId`,
+    `GET /tickets/:id/assignment-requests`, `GET /assignment-requests`,
+    `PATCH /assignment-requests/:id/approve|reject`). Approve/reject run in a
+    transaction with full revalidation (409 on stale owner/assignee/team/trash),
+    manager team-scoping (403), approval applies the single-assignee change +
+    emits a `REASSIGNED` event (reused; no new event type) + AuditLog +
+    notifications (managers on create; requester + new assignee on approve;
+    requester on reject). Customers never see requests/reasons/notes/notifications.
+    Single-assignee unchanged; cross-team requests deferred. Frontend: agent
+    claim/request control + modal + pending banner on ticket detail; manager/admin
+    `/assignment-requests` review page.
   - Remaining slices (reports/dashboards, admin CRUD, audit read surface, SLA
     indicator UI) are pending.
 - M1 delivered:

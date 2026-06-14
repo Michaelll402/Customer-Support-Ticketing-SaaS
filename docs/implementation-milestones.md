@@ -108,6 +108,30 @@ No milestone may leave major half-built features behind.
     mfa → Account & Access; technical/bug/error → Technical Support (default);
     unresolved teams still fall back to `teamId: null` for manager triage. The
     minimal `@demo.test` accounts and the legacy `Billing` team are left untouched.
+  - **Slice 2.6 (agent reassignment approval workflow) is implemented:** an
+    `AssignmentRequest` model (`AssignmentRequestType` REASSIGN_USER /
+    RETURN_TO_QUEUE, `AssignmentRequestStatus` PENDING/APPROVED/REJECTED/
+    CANCELLED) plus three additive `NotificationType` values, via the additive
+    `20260614120000_assignment_requests` migration (**created but not applied to
+    Neon**). **Assignment policy matrix:** ADMIN assigns/approves anywhere;
+    MANAGER assigns/approves within their teams, may self-assign or return a
+    ticket to the queue; AGENT may only **claim an unassigned same-team ticket
+    for themselves** — any other direct reassign/steal/return is **403** and must
+    go through a request. Agents `POST /tickets/:id/assignment-requests`
+    (same-team REASSIGN_USER or RETURN_TO_QUEUE, reasoned), cancel their own
+    pending request, and the ticket stays assigned until a MANAGER/ADMIN approves
+    via `PATCH /assignment-requests/:id/approve|reject` (transactional, full
+    state revalidation → **409** on stale state, manager team-scoping → 403).
+    Approval emits a standard `REASSIGNED` event (no new event type; customer
+    timeline allowlist already excludes it), writes `AuditLog`, and notifies the
+    requester + new assignee; rejection notifies the requester only; creation
+    notifies team managers. **Customers never see** requests, reasons, review
+    notes, or notifications (staff-only endpoints + fail-closed allowlist).
+    **Single-assignee is unchanged** (approval replaces the one `assigneeId`).
+    Cross-team transfer requests are **deferred**; existing manager/admin direct
+    team transfer is unchanged. Frontend: an agent claim/request control + modal +
+    pending banner on the ticket detail, and a manager/admin `/assignment-requests`
+    review page with approve/decline.
   - **Remaining M5 slices are pending:** reports/dashboards, admin CRUD, the
     admin/audit read surfaces, and the SLA indicator UI.
 - The database/backend M1 lean-auth slice is implemented:

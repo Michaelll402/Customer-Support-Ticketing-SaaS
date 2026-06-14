@@ -22,6 +22,8 @@ const appRouteDescriptions: Record<AppRoutePath, string> = {
     'Ticket list, filters, sorting, pagination, customer ticket creation, conversation, notes, attachments, staff workflow controls, in-app notifications, and realtime invalidation are available.',
   '/tickets/trash':
     'Admin-only trash: review soft-deleted tickets and restore them with their full conversation, workflow, and SLA history intact.',
+  '/assignment-requests':
+    'Manager/admin review queue for agent reassignment requests: approve to apply the change or decline to keep the current assignee.',
 };
 
 const appRouteLabelsByRole: Record<
@@ -34,6 +36,7 @@ const appRouteLabelsByRole: Record<
     '/settings': 'Settings',
     '/tickets': 'Ticket Queue',
     '/tickets/trash': 'Trash',
+    '/assignment-requests': 'Assignment requests',
   },
   AGENT: {
     '/profile': 'Profile',
@@ -47,6 +50,7 @@ const appRouteLabelsByRole: Record<
     '/dashboard': 'Dashboard',
     '/profile': 'Profile',
     '/tickets': 'My Queue',
+    '/assignment-requests': 'Assignment requests',
   },
 };
 

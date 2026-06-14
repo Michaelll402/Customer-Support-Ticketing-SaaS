@@ -108,6 +108,11 @@ export const RealtimeProvider = ({ children }: RealtimeProviderProps) => {
       const parsed = notificationCreatedPayloadSchema.safeParse(raw);
       if (!parsed.success) return;
       void queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      // A manager reviewing requests may not be in the ticket room, so refresh
+      // their review queue whenever a request-related notification lands.
+      void queryClient.invalidateQueries({
+        queryKey: ['assignment-requests'],
+      });
     };
 
     const handleTicketUpdated = (raw: unknown) => {
@@ -122,6 +127,11 @@ export const RealtimeProvider = ({ children }: RealtimeProviderProps) => {
       // it for any viewer watching this ticket's thread.
       void queryClient.invalidateQueries({
         queryKey: ['tickets', 'timeline', ticketId],
+      });
+      // Assignment-request mutations emit ticket.updated; refresh the pending
+      // banner and any open review list.
+      void queryClient.invalidateQueries({
+        queryKey: ['assignment-requests'],
       });
     };
 

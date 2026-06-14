@@ -4,6 +4,7 @@ export const appRoutePaths = [
   '/dashboard',
   '/tickets',
   '/tickets/trash',
+  '/assignment-requests',
   '/settings',
   '/profile',
 ] as const;
@@ -11,10 +12,16 @@ export const appRoutePaths = [
 export type AppRoutePath = (typeof appRoutePaths)[number];
 
 const roleAccessPrefixes: Record<UserRole, readonly string[]> = {
-  ADMIN: ['/dashboard', '/tickets', '/settings', '/profile'],
+  ADMIN: [
+    '/dashboard',
+    '/tickets',
+    '/assignment-requests',
+    '/settings',
+    '/profile',
+  ],
   AGENT: ['/tickets', '/profile'],
   CUSTOMER: ['/tickets', '/profile'],
-  MANAGER: ['/dashboard', '/tickets', '/profile'],
+  MANAGER: ['/dashboard', '/tickets', '/assignment-requests', '/profile'],
 };
 
 const matchesPathPrefix = (pathname: string, prefix: string) =>
