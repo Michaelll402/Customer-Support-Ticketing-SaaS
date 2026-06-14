@@ -94,6 +94,20 @@ No milestone may leave major half-built features behind.
     link). **Permanent hard delete is intentionally deferred** — see
     `docs/ticket-trash-and-permanent-purge.md` for the inspected relation/cascade
     map and the storage-first purge design.
+  - **Slice 2.5 (realistic demo organization + routing) is implemented:** an
+    idempotent demo organization — one MANAGER (`manager@support.local`) who is a
+    `TeamMember` of three teams (Billing & Payments, Technical Support, Account &
+    Access), each with three AGENT accounts (`*@support.local`) — added via an
+    extracted, side-effect-free, unit-tested `seedDemoOrganization()` using pure
+    upserts (no duplicates on re-run). **No schema change/migration** was needed:
+    the existing `TeamMember` join already encodes manager scope (global MANAGER
+    role + team membership), and assignment stays single-assignee. Category→team
+    routing was upgraded from brittle exact-name matching to an ordered,
+    case-insensitive keyword matcher (`resolveTeamNameForCategory`): billing/
+    payment/invoice/refund → Billing & Payments; account/access/login/password/
+    mfa → Account & Access; technical/bug/error → Technical Support (default);
+    unresolved teams still fall back to `teamId: null` for manager triage. The
+    minimal `@demo.test` accounts and the legacy `Billing` team are left untouched.
   - **Remaining M5 slices are pending:** reports/dashboards, admin CRUD, the
     admin/audit read surfaces, and the SLA indicator UI.
 - The database/backend M1 lean-auth slice is implemented:

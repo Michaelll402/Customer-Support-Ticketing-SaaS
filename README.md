@@ -227,6 +227,7 @@ corepack pnpm prisma:seed
 ```
 
 The seed script creates the four auth roles plus demo users, teams, categories, tags, and demo tickets.
+It also seeds an idempotent demo organization: one manager who oversees three teams — Billing & Payments, Technical Support, and Account & Access — each staffed by three agents, all on the `@support.local` domain (distinct from the minimal `@demo.test` accounts). Every demo account uses the shared demo password defined in `prisma/seed.ts`; nothing prints credentials to logs.
 Those demo accounts are intended for local/dev verification only.
 
 ### Run the apps

@@ -8,6 +8,8 @@ import {
 } from '@prisma/client';
 import { hash } from 'bcryptjs';
 
+import { seedDemoOrganization } from './seed-organization';
+
 const prisma = new PrismaClient();
 
 const DEMO_PASSWORD = 'Password1!';
@@ -278,6 +280,10 @@ const seed = async () => {
     });
   }
 
+  // Realistic demo organization: one manager over three teams, three agents per
+  // team. Idempotent; reuses the existing TeamMember model.
+  await seedDemoOrganization(prisma, passwordHash);
+
   for (const demoCategory of demoCategories) {
     await prisma.category.upsert({
       where: { name: demoCategory.name },
@@ -482,7 +488,7 @@ const seed = async () => {
   }
 
   console.log(
-    'Seed completed: auth users, teams, categories, tags, demo tickets, and the default SLA plan are in place.',
+    'Seed completed: auth users, the demo organization (1 manager, 3 teams, 9 agents), teams, categories, tags, demo tickets, and the default SLA plan are in place.',
   );
 };
 

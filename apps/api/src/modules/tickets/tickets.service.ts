@@ -165,8 +165,77 @@ export const TICKET_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 
 const DEFAULT_TICKET_TEAM_NAME = 'Technical Support';
 
-const CATEGORY_NAME_TO_TEAM_NAME: Record<string, string> = {
-  Billing: 'Billing',
+// Category-to-team routing is keyword-based rather than exact-name matching so
+// new or renamed categories (e.g. "Payment failure", "Login problem") still
+// route to the right queue without a code change. Rules are evaluated in order;
+// the first whose keyword appears (case-insensitively) anywhere in the category
+// name wins. Unmatched or uncategorized tickets fall back to the default team.
+// This is a deliberately small, readable heuristic — not a routing engine — and
+// it never throws: resolveTeamIdForCategory leaves the ticket teamless (manager
+// triage) when the resolved team does not exist in the workspace.
+const TEAM_ROUTING_RULES: ReadonlyArray<{
+  teamName: string;
+  keywords: ReadonlyArray<string>;
+}> = [
+  {
+    teamName: 'Billing & Payments',
+    keywords: [
+      'billing',
+      'payment',
+      'invoice',
+      'refund',
+      'charge',
+      'subscription',
+    ],
+  },
+  {
+    teamName: 'Account & Access',
+    keywords: [
+      'account',
+      'access',
+      'login',
+      'log in',
+      'sign in',
+      'sign-in',
+      'password',
+      'mfa',
+      '2fa',
+      'auth',
+    ],
+  },
+  {
+    teamName: 'Technical Support',
+    keywords: [
+      'technical',
+      'bug',
+      'error',
+      'outage',
+      'integration',
+      'api',
+      'crash',
+    ],
+  },
+];
+
+/**
+ * Resolves the target team *name* for a category name using ordered keyword
+ * rules. Pure and DB-free so it can be unit-tested directly; the caller maps the
+ * name to a team id (and tolerates a missing team).
+ */
+export const resolveTeamNameForCategory = (
+  categoryName: string | null,
+): string => {
+  if (categoryName) {
+    const normalized = categoryName.toLowerCase();
+
+    for (const rule of TEAM_ROUTING_RULES) {
+      if (rule.keywords.some((keyword) => normalized.includes(keyword))) {
+        return rule.teamName;
+      }
+    }
+  }
+
+  return DEFAULT_TICKET_TEAM_NAME;
 };
 
 const STAFF_ROLES: ReadonlySet<RoleName> = new Set<RoleName>([
@@ -368,9 +437,7 @@ export class TicketsService {
   private async resolveTeamIdForCategory(
     categoryName: string | null,
   ): Promise<string | null> {
-    const targetTeamName =
-      (categoryName !== null && CATEGORY_NAME_TO_TEAM_NAME[categoryName]) ||
-      DEFAULT_TICKET_TEAM_NAME;
+    const targetTeamName = resolveTeamNameForCategory(categoryName);
     const team = await this.prisma.team.findUnique({
       where: {
         name: targetTeamName,

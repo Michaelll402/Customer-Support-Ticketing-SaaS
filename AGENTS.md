@@ -61,6 +61,17 @@ Read these files before making changes:
     admin-only UI (detail two-step Move to Trash + `/tickets/trash` restore view +
     nav). Permanent hard delete is deferred — see
     `docs/ticket-trash-and-permanent-purge.md`.
+  - Slice 2.5 (realistic demo organization + routing) is implemented: an
+    idempotent `seedDemoOrganization()` (extracted to `prisma/seed-organization.ts`,
+    side-effect-free, unit-tested) seeds one MANAGER (`manager@support.local`) as a
+    `TeamMember` of three teams (Billing & Payments, Technical Support, Account &
+    Access), each with three AGENT accounts (`*@support.local`), via pure upserts
+    (no duplicates on re-run). No schema change/migration — `TeamMember` already
+    encodes manager scope; assignment stays single-assignee. Category→team routing
+    is now an ordered case-insensitive keyword matcher
+    (`resolveTeamNameForCategory`, exported and unit-tested), falling back to
+    `teamId: null` (manager triage) when the team is absent. The `@demo.test`
+    accounts and legacy `Billing` team are untouched.
   - Remaining slices (reports/dashboards, admin CRUD, audit read surface, SLA
     indicator UI) are pending.
 - M1 delivered:

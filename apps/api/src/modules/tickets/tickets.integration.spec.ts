@@ -1636,6 +1636,24 @@ describe('Tickets integration', () => {
     };
     prismaMock.teamStore.push(billingTeam);
 
+    // Realistic demo-org teams used by category-to-team routing (Slice 2.5).
+    const billingPaymentsTeam: StoredTeam = {
+      createdAt: new Date('2026-04-20T10:12:00.000Z'),
+      description:
+        'Invoices, refunds, payment failures, and billing questions.',
+      id: randomUUID(),
+      name: 'Billing & Payments',
+    };
+    prismaMock.teamStore.push(billingPaymentsTeam);
+
+    const accountAccessTeam: StoredTeam = {
+      createdAt: new Date('2026-04-20T10:14:00.000Z'),
+      description: 'Login, MFA, password reset, and account access problems.',
+      id: randomUUID(),
+      name: 'Account & Access',
+    };
+    prismaMock.teamStore.push(accountAccessTeam);
+
     const accountAccessCategory: StoredCategory = {
       color: '#7c3aed',
       createdAt: new Date('2026-04-20T10:15:00.000Z'),
@@ -2297,13 +2315,13 @@ describe('Tickets integration', () => {
     expect(exposesSla).toBe(false);
   });
 
-  it('auto-routes a customer-created ticket with the Billing category to the Billing team', async () => {
+  it('auto-routes a customer-created ticket with the Billing category to the Billing & Payments team', async () => {
     const agent = request.agent(app.getHttpServer());
     const billingCategory = prismaMock.categoryStore.find(
       (entry) => entry.name === 'Billing',
     )!;
-    const billingTeam = prismaMock.teamStore.find(
-      (team) => team.name === 'Billing',
+    const billingPaymentsTeam = prismaMock.teamStore.find(
+      (team) => team.name === 'Billing & Payments',
     )!;
 
     await agent
@@ -2325,26 +2343,26 @@ describe('Tickets integration', () => {
       .expect(201);
 
     expect(response.body.team).toEqual({
-      id: billingTeam.id,
-      name: billingTeam.name,
-      description: billingTeam.description,
+      id: billingPaymentsTeam.id,
+      name: billingPaymentsTeam.name,
+      description: billingPaymentsTeam.description,
     });
     expect(response.body.assignee).toBeNull();
 
     const stored = prismaMock.ticketStore.find(
       (ticket) => ticket.id === response.body.id,
     );
-    expect(stored?.teamId).toBe(billingTeam.id);
+    expect(stored?.teamId).toBe(billingPaymentsTeam.id);
     expect(stored?.assigneeId).toBeNull();
   });
 
-  it('auto-routes a customer-created ticket with the Account Access category to the Technical Support team', async () => {
+  it('auto-routes a customer-created ticket with the Account Access category to the Account & Access team', async () => {
     const agent = request.agent(app.getHttpServer());
     const accountAccessCategory = prismaMock.categoryStore.find(
       (entry) => entry.name === 'Account Access',
     )!;
-    const technicalTeam = prismaMock.teamStore.find(
-      (team) => team.name === 'Technical Support',
+    const accountAccessTeam = prismaMock.teamStore.find(
+      (team) => team.name === 'Account & Access',
     )!;
 
     await agent
@@ -2366,16 +2384,16 @@ describe('Tickets integration', () => {
       .expect(201);
 
     expect(response.body.team).toEqual({
-      id: technicalTeam.id,
-      name: technicalTeam.name,
-      description: technicalTeam.description,
+      id: accountAccessTeam.id,
+      name: accountAccessTeam.name,
+      description: accountAccessTeam.description,
     });
     expect(response.body.assignee).toBeNull();
 
     const stored = prismaMock.ticketStore.find(
       (ticket) => ticket.id === response.body.id,
     );
-    expect(stored?.teamId).toBe(technicalTeam.id);
+    expect(stored?.teamId).toBe(accountAccessTeam.id);
   });
 
   it('auto-routes an uncategorized customer-created ticket to the Technical Support team', async () => {
@@ -5657,7 +5675,12 @@ describe('Tickets integration', () => {
     const names = (response.body as Array<{ name: string }>).map(
       (team) => team.name,
     );
-    expect(names).toEqual(['Billing', 'Technical Support']);
+    expect(names).toEqual([
+      'Account & Access',
+      'Billing',
+      'Billing & Payments',
+      'Technical Support',
+    ]);
   });
 
   it('routes GET /tickets/teams to the static team handler, not the :id detail handler', async () => {
