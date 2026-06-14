@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 import { apiRequest } from '@/lib/api';
 
+// Keep in lockstep with the backend Prisma `NotificationType` enum. A value the
+// schema does not list makes the whole notifications response fail to parse.
 export const notificationTypeSchema = z.enum([
   'TICKET_ASSIGNED',
   'TICKET_REPLIED',
@@ -9,6 +11,9 @@ export const notificationTypeSchema = z.enum([
   'NOTE_ADDED',
   'SLA_AT_RISK',
   'SLA_BREACHED',
+  'ASSIGNMENT_REQUEST_CREATED',
+  'ASSIGNMENT_REQUEST_APPROVED',
+  'ASSIGNMENT_REQUEST_REJECTED',
 ]);
 
 export type NotificationType = z.infer<typeof notificationTypeSchema>;
@@ -111,4 +116,7 @@ export const notificationTypeLabels: Record<NotificationType, string> = {
   STATUS_CHANGED: 'Status',
   TICKET_ASSIGNED: 'Assigned',
   TICKET_REPLIED: 'Reply',
+  ASSIGNMENT_REQUEST_CREATED: 'Reassign request',
+  ASSIGNMENT_REQUEST_APPROVED: 'Request approved',
+  ASSIGNMENT_REQUEST_REJECTED: 'Request declined',
 };
