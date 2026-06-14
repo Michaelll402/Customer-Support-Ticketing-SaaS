@@ -96,6 +96,7 @@ The backend is a modular monolith. Milestone 0 established the repo foundation, 
 - `GET /tickets/tags`, `GET /tickets/teams`, `GET /tickets/:id/assignable-users` (read-only workflow options for staff)
 - `DELETE /tickets/:id`, `POST /tickets/:id/restore`, `GET /tickets/trash` (admin-only ticket trash: reversible soft delete + restore; trashed tickets are hidden from every role's list/detail/mutations and from the SLA scanner; trash/restore write `AuditLog` rows and emit `ticket.updated`; permanent hard delete is deferred — see `docs/ticket-trash-and-permanent-purge.md`)
 - Agent reassignment approval workflow (`AssignmentRequest`): agents may only claim an unassigned same-team ticket for themselves; any other direct reassign/return is `403` and must go through a request. `POST /tickets/:id/assignment-requests` (agent; same-team REASSIGN_USER or RETURN_TO_QUEUE), `DELETE /tickets/:ticketId/assignment-requests/:requestId` (cancel own pending), `GET /tickets/:id/assignment-requests` (staff, scoped), `GET /assignment-requests` (manager/admin review queue), `PATCH /assignment-requests/:id/approve|reject` (manager/admin; transactional with state revalidation → 409 on stale state). The ticket stays assigned until approval; approval replaces the single assignee and emits a `REASSIGNED` event; AuditLog + staff notifications throughout; customers never see requests/reasons/notes/notifications. Cross-team requests deferred.
+- Reports backend (read-only, manager/admin except `/reports/me`): `GET /reports/overview`, `GET /reports/queue`, `GET /reports/agent-metrics`, `GET /reports/assignment-requests` (MANAGER/ADMIN), and `GET /reports/me` (AGENT/MANAGER/ADMIN; CUSTOMER 403; uses the authenticated user, never a `userId` param). `windowDays` default 30 / min 1 / max 365 (UTC). ADMIN is global (non-trashed); MANAGER is scoped to their teams + globally-unassigned triage. SLA % = MET / (MET + BREACHED), null on zero denominator. No customer content, emails, request reasons, or review notes are exposed. The reports dashboard UI is deferred.
 - `GET /notifications`, `PATCH /notifications/:id/read`, `PATCH /notifications/read-all`
 - BullMQ notification queue producer (Redis-backed, skipped in test env, idempotent jobIds, REST never blocks on queue failures)
 - Socket.IO realtime gateway with JWT-cookie handshake, `user:{id}` / `ticket:{id}` / `ticket:{id}:staff` rooms, and four server events (`notification.created`, `ticket.updated`, `ticket.message.created.public`, `ticket.message.created.internal`); customers never join staff rooms
@@ -298,6 +299,11 @@ Available now:
 - `GET /assignment-requests` (manager/admin review queue)
 - `PATCH /assignment-requests/:id/approve` (manager/admin)
 - `PATCH /assignment-requests/:id/reject` (manager/admin)
+- `GET /reports/overview` (manager/admin)
+- `GET /reports/queue` (manager/admin)
+- `GET /reports/agent-metrics` (manager/admin)
+- `GET /reports/me` (agent/manager/admin; customer 403)
+- `GET /reports/assignment-requests` (manager/admin)
 - `GET /notifications`
 - `PATCH /notifications/:id/read`
 - `PATCH /notifications/read-all`

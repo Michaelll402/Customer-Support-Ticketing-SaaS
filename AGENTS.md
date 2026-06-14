@@ -90,7 +90,19 @@ Read these files before making changes:
     Single-assignee unchanged; cross-team requests deferred. Frontend: agent
     claim/request control + modal + pending banner on ticket detail; manager/admin
     `/assignment-requests` review page.
-  - Remaining slices (reports/dashboards, admin CRUD, audit read surface, SLA
+  - Slice 3 (reports backend) is implemented: a read-only `ReportsModule`
+    (`GET /reports/overview`, `/queue`, `/agent-metrics` — MANAGER/ADMIN;
+    `/reports/me` — AGENT/MANAGER/ADMIN, CUSTOMER 403, never a `userId` param;
+    `/reports/assignment-requests` — MANAGER/ADMIN). No schema change/migration
+    (existing indexes suffice). `windowDays` default 30 / min 1 / max 365,
+    UTC window = [now − windowDays·24h, now] from a single `now`. ADMIN scope is
+    global non-trashed; MANAGER scope = their teams + globally-unassigned triage
+    (unrelated teams + trashed excluded). SLA % = MET / (MET + BREACHED), 1 dp,
+    null on zero denominator. Aggregations use Prisma `count`/`groupBy`; averages
+    use a slim in-memory aggregation (ids + timestamps + states only — no PII).
+    Privacy: no descriptions, emails, message content, request reasons, or review
+    notes. Frontend dashboard deferred.
+  - Remaining slices (reports dashboard UI, admin CRUD, audit read surface, SLA
     indicator UI) are pending.
 - M1 delivered:
   - `DB-01` identity schema for `Role` and `User`

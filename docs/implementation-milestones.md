@@ -132,7 +132,41 @@ No milestone may leave major half-built features behind.
     team transfer is unchanged. Frontend: an agent claim/request control + modal +
     pending banner on the ticket detail, and a manager/admin `/assignment-requests`
     review page with approve/decline.
-  - **Remaining M5 slices are pending:** reports/dashboards, admin CRUD, the
+  - **Slice 3 (reports backend) is implemented:** a read-only `ReportsModule`
+    (`ReportsController` + `ReportsService`) exposing five endpoints. **No schema
+    change/migration** — the existing indexes (status, priority, createdAt,
+    assigneeId, teamId, `[firstResponseState, firstResponseDueAt]`,
+    `[resolutionState, resolutionDueAt]`, deletedAt) cover the aggregations at
+    this scale. **Date window** (`windowDays`, default 30, min 1, max 365,
+    DTO-validated) is computed in UTC from a single `now`: window = [now −
+    windowDays·24h, now]. **Endpoints & roles:**
+    - `GET /reports/overview` (MGR/ADMIN) — windowed `ticketsCreatedInWindow`
+      (createdAt), `resolvedInWindow` (resolvedAt), current `currentlyOpen`
+      (OPEN+PENDING) / `currentlyUnassigned`, zero-filled `countsByStatus` /
+      `countsByPriority`, and `firstResponseSla` / `resolutionSla` summaries.
+    - `GET /reports/queue` (MGR/ADMIN) — current open-queue health: totals,
+      oldest-open age, status/priority distribution, AT_RISK/BREACHED counts, and
+      a per-team breakdown (named teams + a `(No team)` bucket).
+    - `GET /reports/agent-metrics` (MGR/ADMIN) — one row per **active** AGENT/
+      MANAGER (deduplicated across teams): assigned-open, resolved-in-window,
+      avg first-response/resolution minutes, SLA completion/percentages,
+      at-risk/breached. No `passwordHash`/`tokenVersion`/email.
+    - `GET /reports/me` (AGENT/MGR/ADMIN; **CUSTOMER 403**) — the authenticated
+      user's own metrics from `request.user` (never a `userId` query — rejected
+      with 400) plus pending requests created-by-me and (reviewers) awaiting-my-
+      review.
+    - `GET /reports/assignment-requests` (MGR/ADMIN) — pending / approved /
+      rejected / cancelled-in-window, average review minutes, counts-by-type,
+      oldest pending age.
+      **Scoping:** ADMIN is global (non-trashed); MANAGER is limited to tickets in
+      their teams plus globally-unassigned triage tickets (unrelated teams &
+      trashed excluded). **SLA percentage** = MET / (MET + BREACHED) × 100, rounded
+      to 1 dp, **null when the denominator is 0**; ON_TRACK/AT_RISK are reported but
+      excluded from the completed percentage. **Privacy:** ids, display names,
+      counts, and timestamps only — no descriptions, requester emails, message
+      content, request reasons, or review notes. **The frontend dashboard remains
+      deferred.**
+  - **Remaining M5 slices are pending:** reports dashboard UI, admin CRUD, the
     admin/audit read surfaces, and the SLA indicator UI.
 - The database/backend M1 lean-auth slice is implemented:
   - `DB-01` - Identity schema for `Role` and `User`
