@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  SlaTargetState,
   TicketPriority,
   TicketStatus,
   type Category,
@@ -128,6 +129,37 @@ export class TicketListItemDto {
   })
   category!: TicketListCategorySummaryDto | null;
 
+  @ApiPropertyOptional({
+    description: 'First-response SLA state. Staff-only; omitted for customers.',
+    enum: SlaTargetState,
+  })
+  firstResponseState?: SlaTargetState;
+
+  @ApiPropertyOptional({
+    description: 'Resolution SLA state. Staff-only; omitted for customers.',
+    enum: SlaTargetState,
+  })
+  resolutionState?: SlaTargetState;
+
+  @ApiPropertyOptional({
+    description: 'First-response SLA due date. Staff-only.',
+    format: 'date-time',
+  })
+  firstResponseDueAt?: Date | null;
+
+  @ApiPropertyOptional({
+    description: 'Resolution SLA due date. Staff-only.',
+    format: 'date-time',
+  })
+  resolutionDueAt?: Date | null;
+
+  @ApiPropertyOptional({
+    description:
+      'When the ticket was moved to the trash, if soft-deleted. Staff-only.',
+    format: 'date-time',
+  })
+  deletedAt?: Date | null;
+
   @ApiProperty({
     format: 'date-time',
   })
@@ -140,7 +172,7 @@ export class TicketListItemDto {
 
   static fromRecord(
     record: TicketListRecord,
-    includeStaffEmail = true,
+    includeStaffFields = true,
   ): TicketListItemDto {
     return {
       id: record.id,
@@ -149,12 +181,22 @@ export class TicketListItemDto {
       status: record.status,
       priority: record.priority,
       assignee: record.assignee
-        ? TicketListUserSummaryDto.fromUser(record.assignee, includeStaffEmail)
+        ? TicketListUserSummaryDto.fromUser(record.assignee, includeStaffFields)
         : null,
       team: record.team ? TicketListTeamSummaryDto.fromTeam(record.team) : null,
       category: record.category
         ? TicketListCategorySummaryDto.fromCategory(record.category)
         : null,
+      // SLA and trash fields are staff-only; customer list rows omit them.
+      ...(includeStaffFields
+        ? {
+            firstResponseState: record.firstResponseState,
+            resolutionState: record.resolutionState,
+            firstResponseDueAt: record.firstResponseDueAt,
+            resolutionDueAt: record.resolutionDueAt,
+            deletedAt: record.deletedAt,
+          }
+        : {}),
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     };

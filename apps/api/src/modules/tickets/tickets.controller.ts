@@ -1,4 +1,5 @@
 import {
+  Delete,
   Patch,
   Query,
   Body,
@@ -19,11 +20,13 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBadRequestResponse,
   ApiBody,
+  ApiConflictResponse,
   ApiConsumes,
   ApiCookieAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
+  ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
@@ -222,6 +225,36 @@ export class TicketsController {
   })
   listTicketTeams() {
     return this.ticketsService.listTicketTeams();
+  }
+
+  @Get('trash')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleName.ADMIN)
+  @ApiOperation({
+    summary: 'List soft-deleted (trashed) tickets. Admin only.',
+  })
+  @ApiOkResponse({
+    description: 'Trashed tickets returned successfully.',
+    type: TicketListResponseDto,
+  })
+  @ApiForbiddenResponse({
+    description: 'Only admins can view the ticket trash.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Authentication is required.',
+  })
+  listTrashedTickets(
+    @Req() request: AuthenticatedRequest,
+    @Query(
+      new ValidationPipe({
+        ...validationPipeOptions,
+        expectedType: TicketListQueryDto,
+      }),
+    )
+    query: TicketListQueryDto,
+  ) {
+    return this.ticketsService.listTrashedTickets(request.user, query);
   }
 
   @Post()
@@ -787,5 +820,64 @@ export class TicketsController {
     @Param('id', new ParseUUIDPipe()) ticketId: string,
   ) {
     return this.ticketsService.getTicketById(ticketId, request.user);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleName.ADMIN)
+  @ApiOperation({
+    summary: 'Move a ticket to the trash (reversible soft delete). Admin only.',
+  })
+  @ApiNoContentResponse({
+    description: 'Ticket moved to the trash.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Only admins can move tickets to the trash.',
+  })
+  @ApiNotFoundResponse({
+    description: 'Ticket was not found.',
+  })
+  @ApiConflictResponse({
+    description: 'Ticket is already in the trash.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Authentication is required.',
+  })
+  async trashTicket(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', new ParseUUIDPipe()) ticketId: string,
+  ): Promise<void> {
+    await this.ticketsService.moveTicketToTrash(ticketId, request.user);
+  }
+
+  @Post(':id/restore')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleName.ADMIN)
+  @ApiOperation({
+    summary: 'Restore a trashed ticket with all of its history. Admin only.',
+  })
+  @ApiOkResponse({
+    description: 'Ticket restored successfully.',
+    type: TicketDetailDto,
+  })
+  @ApiForbiddenResponse({
+    description: 'Only admins can restore tickets from the trash.',
+  })
+  @ApiNotFoundResponse({
+    description: 'Ticket was not found.',
+  })
+  @ApiConflictResponse({
+    description: 'Ticket is not in the trash.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Authentication is required.',
+  })
+  restoreTicket(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', new ParseUUIDPipe()) ticketId: string,
+  ) {
+    return this.ticketsService.restoreTicket(ticketId, request.user);
   }
 }

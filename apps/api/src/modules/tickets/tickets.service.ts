@@ -21,9 +21,11 @@ import {
 import { randomUUID } from 'node:crypto';
 
 import type { AccessTokenPayload } from '../auth/auth.types';
+import { AuditService } from '../audit/audit.service';
 import { QueueService } from '../queue/queue.service';
 import type { NotificationJobPayload } from '../queue/queue.constants';
 import { RealtimeService } from '../realtime/realtime.service';
+import { SlaService } from '../sla/sla.service';
 import { StorageService } from '../storage/storage.service';
 import { PrismaService } from '../../common/database/prisma.service';
 import type { AssignTicketDto } from './dto/assign-ticket.dto';
@@ -231,6 +233,8 @@ export class TicketsService {
     @Inject(StorageService) private readonly storage: StorageService,
     @Inject(QueueService) private readonly queueService: QueueService,
     @Inject(RealtimeService) private readonly realtimeService: RealtimeService,
+    @Inject(SlaService) private readonly slaService: SlaService,
+    @Inject(AuditService) private readonly auditService: AuditService,
   ) {}
 
   async listTicketCategories(): Promise<TicketCategoryOptionDto[]> {
@@ -329,6 +333,14 @@ export class TicketsService {
       resolvedCategory?.name ?? null,
     );
 
+    // Compute SLA due dates from the matching plan (if any). Without a plan the
+    // returned fragment is empty, so the ticket keeps null due dates.
+    const sla = await this.slaService.buildCreationSla(
+      input.categoryId ?? null,
+      input.priority,
+      new Date(),
+    );
+
     const ticket = await this.prisma.ticket.create({
       data: {
         categoryId: input.categoryId ?? null,
@@ -338,6 +350,7 @@ export class TicketsService {
         status: TicketStatus.OPEN,
         subject: input.subject,
         teamId,
+        ...sla,
         events: {
           create: {
             actorId: requester.sub,
@@ -506,6 +519,12 @@ export class TicketsService {
       ticketId: visibleTicket.id,
       type: TicketEventType.REPLIED,
     });
+
+    // The first PUBLIC reply by a staff member stops the first-response SLA
+    // clock. Customer replies and internal notes never count.
+    if (STAFF_ROLES.has(viewer.role)) {
+      await this.markFirstResponseSafely(visibleTicket.id);
+    }
 
     await this.produceReplyNotification(
       visibleTicket.id,
@@ -896,6 +915,16 @@ export class TicketsService {
 
     const eventId = randomUUID();
 
+    // Resolution SLA changes applied atomically with the status transition:
+    // resolving stamps resolvedAt/MET; reopening clears it and recomputes the
+    // resolution due date. First response is untouched here.
+    const slaData = await this.slaService.resolveStatusTransitionSla(
+      visibleTicket.id,
+      fromStatus,
+      input.status,
+      new Date(),
+    );
+
     // Atomic guarded transition: the update only succeeds while the row is still
     // in `fromStatus`, so two concurrent requests cannot both commit and produce
     // an effective transition the matrix forbids. A zero count means another
@@ -909,6 +938,7 @@ export class TicketsService {
         },
         data: {
           status: input.status,
+          ...slaData,
         },
       });
 
@@ -1246,6 +1276,164 @@ export class TicketsService {
     return dto;
   }
 
+  async moveTicketToTrash(
+    ticketId: string,
+    viewer: TicketVisibilityViewer,
+  ): Promise<void> {
+    this.requireAdmin(viewer);
+
+    const ticket = await this.prisma.ticket.findFirst({
+      where: { id: ticketId, deletedAt: null },
+      select: { id: true, number: true, subject: true },
+    });
+
+    if (!ticket) {
+      const exists = await this.prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: { id: true },
+      });
+
+      if (exists) {
+        throw new ConflictException('Ticket is already in the trash.');
+      }
+
+      throw new NotFoundException('Ticket not found.');
+    }
+
+    // Soft delete: the row and all of its conversation/SLA history are kept so
+    // the action is fully reversible via restore.
+    await this.prisma.ticket.update({
+      where: { id: ticket.id },
+      data: { deletedAt: new Date(), deletedById: viewer.sub },
+    });
+
+    await this.recordTicketAudit(viewer.sub, 'admin.ticket.trashed', ticket);
+    await this.emitTicketUpdatedAfterTrashChange(ticket.id);
+  }
+
+  async restoreTicket(
+    ticketId: string,
+    viewer: TicketVisibilityViewer,
+  ): Promise<TicketDetailDto> {
+    this.requireAdmin(viewer);
+
+    const ticket = await this.prisma.ticket.findFirst({
+      where: { id: ticketId, deletedAt: { not: null } },
+      select: { id: true, number: true, subject: true },
+    });
+
+    if (!ticket) {
+      const exists = await this.prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: { id: true },
+      });
+
+      if (exists) {
+        throw new ConflictException('Ticket is not in the trash.');
+      }
+
+      throw new NotFoundException('Ticket not found.');
+    }
+
+    // Restore preserves every relation (messages, events, attachments, team,
+    // assignee, status, and SLA history) — only the trash markers are cleared.
+    await this.prisma.ticket.update({
+      where: { id: ticket.id },
+      data: { deletedAt: null, deletedById: null },
+    });
+
+    await this.recordTicketAudit(viewer.sub, 'admin.ticket.restored', ticket);
+
+    const dto = await this.loadTicketDetail(ticketId);
+    this.emitTicketUpdatedFromDto(dto);
+    return dto;
+  }
+
+  async listTrashedTickets(
+    viewer: TicketVisibilityViewer,
+    query: TicketListQueryDto,
+  ): Promise<TicketListResponseDto> {
+    this.requireAdmin(viewer);
+
+    const where: Prisma.TicketWhereInput = { deletedAt: { not: null } };
+    const orderBy = this.buildListOrderBy(query.sortBy, query.sortOrder);
+    const skip = (query.page - 1) * query.limit;
+
+    const [totalItems, tickets] = await Promise.all([
+      this.prisma.ticket.count({ where }),
+      this.prisma.ticket.findMany({
+        where,
+        include: ticketListInclude,
+        orderBy,
+        skip,
+        take: query.limit,
+      }),
+    ]);
+
+    const totalPages =
+      totalItems === 0 ? 0 : Math.ceil(totalItems / query.limit);
+
+    return {
+      items: tickets.map((ticket) =>
+        TicketListItemDto.fromRecord(ticket, true),
+      ),
+      meta: {
+        page: query.page,
+        limit: query.limit,
+        totalItems,
+        totalPages,
+        hasNextPage: query.page < totalPages,
+        hasPreviousPage: query.page > 1 && totalPages > 0,
+        sortBy: query.sortBy,
+        sortOrder: query.sortOrder,
+      },
+    };
+  }
+
+  private requireAdmin(viewer: TicketVisibilityViewer): void {
+    if (viewer.role !== RoleName.ADMIN) {
+      throw new ForbiddenException('Only admins can manage the ticket trash.');
+    }
+  }
+
+  private async recordTicketAudit(
+    actorId: string,
+    action: string,
+    ticket: { id: string; number: number; subject: string },
+  ): Promise<void> {
+    try {
+      await this.auditService.record({
+        actorId,
+        action,
+        targetType: 'Ticket',
+        targetId: ticket.id,
+        metadata: { number: ticket.number, subject: ticket.subject },
+      });
+    } catch (error) {
+      this.logger.warn({
+        event: 'audit.record_failed',
+        action,
+        ticketId: ticket.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async emitTicketUpdatedAfterTrashChange(
+    ticketId: string,
+  ): Promise<void> {
+    try {
+      const dto = await this.loadTicketDetail(ticketId);
+      this.emitTicketUpdatedFromDto(dto);
+    } catch (error) {
+      this.logger.warn({
+        event: 'realtime.emit_failed_at_producer',
+        error: error instanceof Error ? error.message : String(error),
+        wsEvent: 'ticket.updated',
+      });
+    }
+  }
+
   async listTicketTags(): Promise<TicketTagOptionDto[]> {
     const tags = await this.prisma.tag.findMany({
       orderBy: {
@@ -1580,6 +1768,18 @@ export class TicketsService {
     }
   }
 
+  private async markFirstResponseSafely(ticketId: string): Promise<void> {
+    try {
+      await this.slaService.markFirstResponse(ticketId, new Date());
+    } catch (error) {
+      this.logger.warn({
+        event: 'sla.first_response_failed',
+        ticketId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   private async findVisibleTicketForMutation(
     ticketId: string,
     viewer: TicketVisibilityViewer,
@@ -1788,14 +1988,18 @@ export class TicketsService {
   private buildVisibilityWhere(
     viewer: TicketVisibilityViewer,
   ): Prisma.TicketWhereInput {
+    // Trashed (soft-deleted) tickets are excluded from every normal
+    // list/detail/mutation path for all roles, including admins. Admins reach
+    // them only through the dedicated trash endpoints.
     switch (viewer.role) {
       case RoleName.CUSTOMER:
         return {
+          deletedAt: null,
           requesterId: viewer.sub,
         };
       case RoleName.AGENT:
-      case RoleName.MANAGER:
         return {
+          deletedAt: null,
           OR: [
             {
               assigneeId: viewer.sub,
@@ -1811,9 +2015,36 @@ export class TicketsService {
             },
           ],
         };
+      case RoleName.MANAGER:
+        return {
+          deletedAt: null,
+          OR: [
+            {
+              assigneeId: viewer.sub,
+            },
+            {
+              team: {
+                members: {
+                  some: {
+                    userId: viewer.sub,
+                  },
+                },
+              },
+            },
+            // Globally unassigned tickets (no team AND no assignee) surface to
+            // managers for triage. Ordinary agents never see them, and assigning
+            // either a team or a user removes a ticket from this triage view.
+            {
+              assigneeId: null,
+              teamId: null,
+            },
+          ],
+        };
       case RoleName.ADMIN:
       default:
-        return {};
+        return {
+          deletedAt: null,
+        };
     }
   }
 

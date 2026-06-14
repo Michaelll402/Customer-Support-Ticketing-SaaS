@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  SlaTargetState,
   TicketPriority,
   TicketStatus,
   type Category,
@@ -174,14 +175,48 @@ export class TicketDetailDto {
   tags!: TicketTagSummaryDto[];
 
   @ApiPropertyOptional({
+    description:
+      'First-response SLA due date. Staff-only; omitted from customer responses.',
     format: 'date-time',
   })
-  firstResponseDueAt!: Date | null;
+  firstResponseDueAt?: Date | null;
 
   @ApiPropertyOptional({
+    description:
+      'Resolution SLA due date. Staff-only; omitted from customer responses.',
     format: 'date-time',
   })
-  resolutionDueAt!: Date | null;
+  resolutionDueAt?: Date | null;
+
+  @ApiPropertyOptional({
+    description: 'When the first staff response occurred. Staff-only.',
+    format: 'date-time',
+  })
+  firstRespondedAt?: Date | null;
+
+  @ApiPropertyOptional({
+    description: 'When the ticket was resolved or closed. Staff-only.',
+    format: 'date-time',
+  })
+  resolvedAt?: Date | null;
+
+  @ApiPropertyOptional({
+    description: 'First-response SLA state. Staff-only.',
+    enum: SlaTargetState,
+  })
+  firstResponseState?: SlaTargetState;
+
+  @ApiPropertyOptional({
+    description: 'Resolution SLA state. Staff-only.',
+    enum: SlaTargetState,
+  })
+  resolutionState?: SlaTargetState;
+
+  @ApiPropertyOptional({
+    description: 'Identifier of the applied SLA plan. Staff-only.',
+    format: 'uuid',
+  })
+  slaPlanId?: string | null;
 
   @ApiProperty({
     format: 'date-time',
@@ -195,7 +230,7 @@ export class TicketDetailDto {
 
   static fromRecord(
     record: TicketDetailRecord,
-    includeStaffEmail = true,
+    includeStaffFields = true,
   ): TicketDetailDto {
     return {
       id: record.id,
@@ -217,7 +252,7 @@ export class TicketDetailDto {
             id: record.assignee.id,
             firstName: record.assignee.firstName,
             lastName: record.assignee.lastName,
-            ...(includeStaffEmail ? { email: record.assignee.email } : {}),
+            ...(includeStaffFields ? { email: record.assignee.email } : {}),
           }
         : null,
       team: record.team ? TicketTeamSummaryDto.fromTeam(record.team) : null,
@@ -225,8 +260,19 @@ export class TicketDetailDto {
         ? TicketCategorySummaryDto.fromCategory(record.category)
         : null,
       tags: record.tags.map((entry) => TicketTagSummaryDto.fromTag(entry.tag)),
-      firstResponseDueAt: record.firstResponseDueAt,
-      resolutionDueAt: record.resolutionDueAt,
+      // SLA fields are operational and staff-only; customers receive none of
+      // them (fail-closed: a customer response simply omits these keys).
+      ...(includeStaffFields
+        ? {
+            firstResponseDueAt: record.firstResponseDueAt,
+            resolutionDueAt: record.resolutionDueAt,
+            firstRespondedAt: record.firstRespondedAt,
+            resolvedAt: record.resolvedAt,
+            firstResponseState: record.firstResponseState,
+            resolutionState: record.resolutionState,
+            slaPlanId: record.slaPlanId,
+          }
+        : {}),
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     };

@@ -94,6 +94,7 @@ model User {
   uploadedAttachments Attachment[]    @relation("AttachmentUploader")
   notifications       Notification[]
   auditLogs           AuditLog[]
+  deletedTickets      Ticket[]        @relation("TicketDeletedBy")
 }
 
 model Team {
@@ -156,6 +157,8 @@ model Ticket {
   slaPlanId          String?         @db.Uuid
   firstResponseState SlaTargetState  @default(ON_TRACK)
   resolutionState    SlaTargetState  @default(ON_TRACK)
+  deletedAt          DateTime?
+  deletedById        String?         @db.Uuid
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
   requester          User            @relation("RequestedTickets", fields: [requesterId], references: [id], onDelete: Restrict)
@@ -163,6 +166,7 @@ model Ticket {
   team               Team?           @relation(fields: [teamId], references: [id], onDelete: SetNull)
   category           Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   slaPlan            SlaPlan?        @relation(fields: [slaPlanId], references: [id], onDelete: SetNull)
+  deletedBy          User?           @relation("TicketDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
   tags               TicketTag[]
   events             TicketEvent[]
   messages           TicketMessage[]
@@ -180,6 +184,7 @@ model Ticket {
   @@index([firstResponseState, firstResponseDueAt])
   @@index([resolutionState, resolutionDueAt])
   @@index([slaPlanId])
+  @@index([deletedAt])
 }
 
 model TicketTag {

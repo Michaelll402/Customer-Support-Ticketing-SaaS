@@ -1,9 +1,18 @@
 import { BullModule } from '@nestjs/bullmq';
-import { Module, type DynamicModule, type Provider } from '@nestjs/common';
+import {
+  forwardRef,
+  Module,
+  type DynamicModule,
+  type Provider,
+} from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { NotificationsModule } from '../notifications/notifications.module';
 import { RealtimeModule } from '../realtime/realtime.module';
+import { SLA_QUEUE_NAME } from '../sla/sla.constants';
+import { SlaModule } from '../sla/sla.module';
+import { SlaScanProcessor } from '../sla/sla.scan.processor';
+import { SlaScheduler } from '../sla/sla.scheduler';
 import { NotificationsProcessor } from './notifications.processor';
 import { NOTIFICATIONS_QUEUE_NAME } from './queue.constants';
 import { QueueService } from './queue.service';
@@ -34,14 +43,22 @@ const queueImports: DynamicModule[] = isTestEnv
       BullModule.registerQueue({
         name: NOTIFICATIONS_QUEUE_NAME,
       }),
+      BullModule.registerQueue({
+        name: SLA_QUEUE_NAME,
+      }),
     ];
 
 const queueProviders: Provider[] = isTestEnv
   ? [QueueService]
-  : [QueueService, NotificationsProcessor];
+  : [QueueService, NotificationsProcessor, SlaScanProcessor, SlaScheduler];
 
 @Module({
-  imports: [...queueImports, NotificationsModule, RealtimeModule],
+  imports: [
+    ...queueImports,
+    NotificationsModule,
+    RealtimeModule,
+    forwardRef(() => SlaModule),
+  ],
   providers: queueProviders,
   exports: [QueueService],
 })

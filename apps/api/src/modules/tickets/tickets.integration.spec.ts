@@ -6,6 +6,8 @@ import { Test } from '@nestjs/testing';
 import {
   NotificationType,
   RoleName,
+  SlaPlanAppliesTo,
+  SlaTargetState,
   TicketEventType,
   TicketPriority,
   TicketStatus,
@@ -83,17 +85,47 @@ interface StoredTicket {
   assigneeId: string | null;
   categoryId: string | null;
   createdAt: Date;
+  deletedAt?: Date | null;
+  deletedById?: string | null;
   description: string;
   firstResponseDueAt: Date | null;
+  firstRespondedAt?: Date | null;
+  firstResponseState?: SlaTargetState;
   id: string;
   number: number;
   priority: TicketPriority;
   requesterId: string;
   resolutionDueAt: Date | null;
+  resolvedAt?: Date | null;
+  resolutionState?: SlaTargetState;
+  slaPlanId?: string | null;
   status: TicketStatus;
   subject: string;
   teamId: string | null;
   updatedAt: Date;
+}
+
+interface StoredSlaPlan {
+  appliesTo: SlaPlanAppliesTo;
+  categoryId: string | null;
+  createdAt: Date;
+  firstResponseMinutes: number;
+  id: string;
+  isActive: boolean;
+  name: string;
+  priority: TicketPriority | null;
+  resolutionMinutes: number;
+  updatedAt: Date;
+}
+
+interface StoredAuditLog {
+  id: string;
+  actorId: string | null;
+  action: string;
+  targetType: string;
+  targetId: string;
+  metadata: Prisma.JsonValue | null;
+  createdAt: Date;
 }
 
 interface StoredTicketTag {
@@ -179,6 +211,8 @@ type UpdateArgs = {
     assigneeId?: string | null;
     teamId?: string | null;
     categoryId?: string | null;
+    deletedAt?: Date | null;
+    deletedById?: string | null;
   };
 } & TicketIncludeArgs;
 
@@ -378,6 +412,8 @@ const createPrismaMock = () => {
   const ticketEvents: StoredTicketEvent[] = [];
   const ticketMessages: StoredTicketMessage[] = [];
   const attachments: StoredAttachment[] = [];
+  const slaPlans: StoredSlaPlan[] = [];
+  const auditLogs: StoredAuditLog[] = [];
   let nextTicketNumber = 1000;
   const priorityRank: Record<TicketPriority, number> = {
     [TicketPriority.LOW]: 1,
@@ -417,6 +453,13 @@ const createPrismaMock = () => {
       requester,
       tags: links,
       team,
+      firstRespondedAt: ticket.firstRespondedAt ?? null,
+      resolvedAt: ticket.resolvedAt ?? null,
+      slaPlanId: ticket.slaPlanId ?? null,
+      firstResponseState: ticket.firstResponseState ?? SlaTargetState.ON_TRACK,
+      resolutionState: ticket.resolutionState ?? SlaTargetState.ON_TRACK,
+      deletedAt: ticket.deletedAt ?? null,
+      deletedById: ticket.deletedById ?? null,
     };
   };
 
@@ -462,6 +505,24 @@ const createPrismaMock = () => {
       return false;
     }
 
+    if (where.deletedAt !== undefined) {
+      const ticketTrashed = ticket.deletedAt != null;
+
+      if (where.deletedAt === null) {
+        if (ticketTrashed) {
+          return false;
+        }
+      } else if (
+        typeof where.deletedAt === 'object' &&
+        where.deletedAt !== null &&
+        (where.deletedAt as { not?: unknown }).not === null
+      ) {
+        if (!ticketTrashed) {
+          return false;
+        }
+      }
+    }
+
     if (where.requesterId && ticket.requesterId !== where.requesterId) {
       return false;
     }
@@ -473,7 +534,7 @@ const createPrismaMock = () => {
       return false;
     }
 
-    if (where.teamId && ticket.teamId !== where.teamId) {
+    if (where.teamId !== undefined && ticket.teamId !== where.teamId) {
       return false;
     }
 
@@ -835,8 +896,11 @@ const createPrismaMock = () => {
               type: TicketEventType;
             };
           };
+          firstResponseDueAt?: Date;
           priority: TicketPriority;
           requesterId: string;
+          resolutionDueAt?: Date;
+          slaPlanId?: string;
           status: TicketStatus;
           subject: string;
           teamId?: string | null;
@@ -847,13 +911,20 @@ const createPrismaMock = () => {
           assigneeId: null,
           categoryId: data.categoryId,
           createdAt: now,
+          deletedAt: null,
+          deletedById: null,
           description: data.description,
-          firstResponseDueAt: null,
+          firstResponseDueAt: data.firstResponseDueAt ?? null,
+          firstRespondedAt: null,
+          firstResponseState: SlaTargetState.ON_TRACK,
           id: randomUUID(),
           number: nextTicketNumber++,
           priority: data.priority,
           requesterId: data.requesterId,
-          resolutionDueAt: null,
+          resolutionDueAt: data.resolutionDueAt ?? null,
+          resolutionState: SlaTargetState.ON_TRACK,
+          resolvedAt: null,
+          slaPlanId: data.slaPlanId ?? null,
           status: data.status,
           subject: data.subject,
           teamId: data.teamId ?? null,
@@ -939,6 +1010,14 @@ const createPrismaMock = () => {
         ticket.categoryId = data.categoryId;
       }
 
+      if (data.deletedAt !== undefined) {
+        ticket.deletedAt = data.deletedAt;
+      }
+
+      if (data.deletedById !== undefined) {
+        ticket.deletedById = data.deletedById;
+      }
+
       ticket.updatedAt = now;
 
       if (data.events?.create) {
@@ -959,8 +1038,21 @@ const createPrismaMock = () => {
         data,
         where,
       }: {
-        data: { status?: TicketStatus };
-        where: { id?: string; status?: TicketStatus };
+        data: {
+          status?: TicketStatus;
+          firstRespondedAt?: Date | null;
+          firstResponseState?: SlaTargetState;
+          resolvedAt?: Date | null;
+          resolutionState?: SlaTargetState;
+          resolutionDueAt?: Date | null;
+        };
+        where: {
+          id?: string;
+          status?: TicketStatus;
+          firstRespondedAt?: Date | null;
+          firstResponseState?: SlaTargetState;
+          resolutionState?: SlaTargetState;
+        };
       }) => {
         let count = 0;
 
@@ -973,8 +1065,46 @@ const createPrismaMock = () => {
             continue;
           }
 
+          if (
+            where.firstRespondedAt === null &&
+            ticket.firstRespondedAt != null
+          ) {
+            continue;
+          }
+
+          if (
+            where.firstResponseState !== undefined &&
+            (ticket.firstResponseState ?? SlaTargetState.ON_TRACK) !==
+              where.firstResponseState
+          ) {
+            continue;
+          }
+
+          if (
+            where.resolutionState !== undefined &&
+            (ticket.resolutionState ?? SlaTargetState.ON_TRACK) !==
+              where.resolutionState
+          ) {
+            continue;
+          }
+
           if (data.status !== undefined) {
             ticket.status = data.status;
+          }
+          if (data.firstRespondedAt !== undefined) {
+            ticket.firstRespondedAt = data.firstRespondedAt;
+          }
+          if (data.firstResponseState !== undefined) {
+            ticket.firstResponseState = data.firstResponseState;
+          }
+          if (data.resolvedAt !== undefined) {
+            ticket.resolvedAt = data.resolvedAt;
+          }
+          if (data.resolutionState !== undefined) {
+            ticket.resolutionState = data.resolutionState;
+          }
+          if (data.resolutionDueAt !== undefined) {
+            ticket.resolutionDueAt = data.resolutionDueAt;
           }
 
           ticket.updatedAt = new Date();
@@ -1298,6 +1428,63 @@ const createPrismaMock = () => {
     }),
   };
 
+  const slaPlanModel = {
+    findMany: vi.fn(
+      async ({ where }: { where?: { isActive?: boolean } } = {}) =>
+        slaPlans.filter(
+          (plan) =>
+            where?.isActive === undefined || plan.isActive === where.isActive,
+        ),
+    ),
+    findUnique: vi.fn(
+      async ({ where }: { where: { id: string } }) =>
+        slaPlans.find((plan) => plan.id === where.id) ?? null,
+    ),
+  };
+
+  const auditLogModel = {
+    create: vi.fn(
+      async ({
+        data,
+      }: {
+        data: {
+          actorId?: string | null;
+          action: string;
+          targetType: string;
+          targetId: string;
+          metadata?: Prisma.InputJsonValue;
+        };
+      }) => {
+        const entry: StoredAuditLog = {
+          id: randomUUID(),
+          actorId: data.actorId ?? null,
+          action: data.action,
+          targetType: data.targetType,
+          targetId: data.targetId,
+          metadata: (data.metadata ?? null) as Prisma.JsonValue | null,
+          createdAt: new Date(),
+        };
+        auditLogs.push(entry);
+        return entry;
+      },
+    ),
+    findMany: vi.fn(
+      async ({
+        where,
+      }: {
+        where?: { targetType?: string; targetId?: string; action?: string };
+      } = {}) =>
+        auditLogs.filter(
+          (entry) =>
+            (where?.targetType === undefined ||
+              entry.targetType === where.targetType) &&
+            (where?.targetId === undefined ||
+              entry.targetId === where.targetId) &&
+            (where?.action === undefined || entry.action === where.action),
+        ),
+    ),
+  };
+
   return {
     $transaction: vi.fn(
       async <T>(
@@ -1329,8 +1516,12 @@ const createPrismaMock = () => {
     ),
     attachmentStore: attachments,
     attachment: attachmentModel,
+    auditLog: auditLogModel,
+    auditLogStore: auditLogs,
     categoryStore: categories,
     roleStore: roles,
+    slaPlan: slaPlanModel,
+    slaPlanStore: slaPlans,
     tagStore: tags,
     teamMemberStore: teamMembers,
     teamStore: teams,
@@ -1820,8 +2011,6 @@ describe('Tickets integration', () => {
         color: category.color,
       },
       tags: [],
-      firstResponseDueAt: null,
-      resolutionDueAt: null,
       createdAt: expect.any(String),
       updatedAt: expect.any(String),
     });
@@ -1834,6 +2023,278 @@ describe('Tickets integration', () => {
           event.ticketId === response.body.id,
       ),
     ).toBe(true);
+  });
+
+  // ---- M5 Slice 2: SLA engine integration ----
+
+  const seedStandardPlan = () => {
+    const plan: StoredSlaPlan = {
+      appliesTo: SlaPlanAppliesTo.ALL,
+      categoryId: null,
+      createdAt: new Date('2026-04-20T10:00:00.000Z'),
+      firstResponseMinutes: 60,
+      id: randomUUID(),
+      isActive: true,
+      name: 'Standard',
+      priority: null,
+      resolutionMinutes: 1440,
+      updatedAt: new Date('2026-04-20T10:00:00.000Z'),
+    };
+    prismaMock.slaPlanStore.push(plan);
+    return plan;
+  };
+
+  it('computes SLA due dates from the matching plan on ticket creation', async () => {
+    const plan = seedStandardPlan();
+    const agent = request.agent(app.getHttpServer());
+    const category = prismaMock.categoryStore[0]!;
+
+    await agent
+      .post('/auth/login')
+      .send({ email: 'customer@demo.test', password: 'Password1!' })
+      .expect(200);
+    const created = await agent
+      .post('/tickets')
+      .send({
+        categoryId: category.id,
+        description: 'SLA creation test description.',
+        priority: TicketPriority.HIGH,
+        subject: 'SLA creation test',
+      })
+      .expect(201);
+
+    const stored = prismaMock.ticketStore.find(
+      (ticket) => ticket.id === created.body.id,
+    )!;
+    expect(stored.slaPlanId).toBe(plan.id);
+    expect(stored.firstResponseDueAt).not.toBeNull();
+    expect(stored.resolutionDueAt).not.toBeNull();
+    expect(stored.firstResponseState).toBe(SlaTargetState.ON_TRACK);
+    // The customer response must not expose any SLA fields.
+    expect(created.body).not.toHaveProperty('firstResponseDueAt');
+    expect(created.body).not.toHaveProperty('slaPlanId');
+  });
+
+  it('leaves SLA null when no active plan matches a new ticket', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const category = prismaMock.categoryStore[0]!;
+
+    await agent
+      .post('/auth/login')
+      .send({ email: 'customer@demo.test', password: 'Password1!' })
+      .expect(200);
+    const created = await agent
+      .post('/tickets')
+      .send({
+        categoryId: category.id,
+        description: 'No matching plan description.',
+        priority: TicketPriority.LOW,
+        subject: 'No plan ticket',
+      })
+      .expect(201);
+
+    const stored = prismaMock.ticketStore.find(
+      (ticket) => ticket.id === created.body.id,
+    )!;
+    expect(stored.slaPlanId ?? null).toBeNull();
+    expect(stored.firstResponseDueAt).toBeNull();
+    expect(stored.resolutionDueAt).toBeNull();
+  });
+
+  it('exposes SLA fields to staff and hides them from the customer on detail', async () => {
+    const plan = seedStandardPlan();
+    const ownTicket = prismaMock.ticketStore.find(
+      (ticket) => ticket.subject === 'Own ticket detail',
+    )!;
+    ownTicket.slaPlanId = plan.id;
+    ownTicket.firstResponseDueAt = new Date('2026-04-22T10:00:00.000Z');
+    ownTicket.resolutionDueAt = new Date('2026-04-23T10:00:00.000Z');
+
+    const customer = request.agent(app.getHttpServer());
+    await customer
+      .post('/auth/login')
+      .send({ email: 'customer@demo.test', password: 'Password1!' })
+      .expect(200);
+    const customerResponse = await customer
+      .get(`/tickets/${ownTicket.id}`)
+      .expect(200);
+    expect(customerResponse.body).not.toHaveProperty('firstResponseDueAt');
+    expect(customerResponse.body).not.toHaveProperty('firstResponseState');
+    expect(customerResponse.body).not.toHaveProperty('slaPlanId');
+
+    const admin = request.agent(app.getHttpServer());
+    await admin
+      .post('/auth/login')
+      .send({ email: 'admin@demo.test', password: 'Password1!' })
+      .expect(200);
+    const adminResponse = await admin
+      .get(`/tickets/${ownTicket.id}`)
+      .expect(200);
+    expect(adminResponse.body.slaPlanId).toBe(plan.id);
+    expect(adminResponse.body.firstResponseState).toBe(SlaTargetState.ON_TRACK);
+    expect(adminResponse.body).toHaveProperty('firstResponseDueAt');
+  });
+
+  it('omits SLA fields from customer ticket list rows', async () => {
+    const customer = request.agent(app.getHttpServer());
+    await customer
+      .post('/auth/login')
+      .send({ email: 'customer@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await customer.get('/tickets').expect(200);
+    for (const item of response.body.items as Array<Record<string, unknown>>) {
+      expect(item).not.toHaveProperty('firstResponseState');
+      expect(item).not.toHaveProperty('firstResponseDueAt');
+    }
+  });
+
+  it('marks first response met on the first staff public reply and not on later ones', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Assigned ticket',
+    )!;
+    ticket.status = TicketStatus.OPEN;
+    ticket.firstRespondedAt = null;
+    ticket.firstResponseState = SlaTargetState.ON_TRACK;
+
+    const agent = request.agent(app.getHttpServer());
+    await agent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await agent
+      .post(`/tickets/${ticket.id}/replies`)
+      .send({ body: 'First staff reply.' })
+      .expect(201);
+
+    const afterFirst = prismaMock.ticketStore.find(
+      (entry) => entry.id === ticket.id,
+    )!;
+    expect(afterFirst.firstRespondedAt).not.toBeNull();
+    expect(afterFirst.firstResponseState).toBe(SlaTargetState.MET);
+    const firstRespondedAt = afterFirst.firstRespondedAt;
+
+    await agent
+      .post(`/tickets/${ticket.id}/replies`)
+      .send({ body: 'Second staff reply.' })
+      .expect(201);
+
+    expect(
+      prismaMock.ticketStore.find((entry) => entry.id === ticket.id)!
+        .firstRespondedAt,
+    ).toBe(firstRespondedAt);
+  });
+
+  it('does not mark first response on a customer reply or a staff internal note', async () => {
+    const ownTicket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Own ticket detail',
+    )!;
+    ownTicket.status = TicketStatus.OPEN;
+    ownTicket.firstRespondedAt = null;
+    ownTicket.firstResponseState = SlaTargetState.ON_TRACK;
+
+    const customer = request.agent(app.getHttpServer());
+    await customer
+      .post('/auth/login')
+      .send({ email: 'customer@demo.test', password: 'Password1!' })
+      .expect(200);
+    await customer
+      .post(`/tickets/${ownTicket.id}/replies`)
+      .send({ body: 'Customer reply.' })
+      .expect(201);
+    expect(
+      prismaMock.ticketStore.find((entry) => entry.id === ownTicket.id)!
+        .firstRespondedAt ?? null,
+    ).toBeNull();
+
+    const teamTicket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Team queue ticket',
+    )!;
+    teamTicket.firstRespondedAt = null;
+    teamTicket.firstResponseState = SlaTargetState.ON_TRACK;
+
+    const agent = request.agent(app.getHttpServer());
+    await agent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+    await agent
+      .post(`/tickets/${teamTicket.id}/internal-notes`)
+      .send({ body: 'Internal note that is not a customer-facing response.' })
+      .expect(201);
+    expect(
+      prismaMock.ticketStore.find((entry) => entry.id === teamTicket.id)!
+        .firstRespondedAt ?? null,
+    ).toBeNull();
+  });
+
+  it('marks resolution met on resolve and recomputes only resolution on reopen', async () => {
+    const plan = seedStandardPlan();
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Assigned ticket',
+    )!;
+    ticket.status = TicketStatus.OPEN;
+    ticket.slaPlanId = plan.id;
+    ticket.firstRespondedAt = new Date('2026-04-21T10:00:00.000Z');
+    ticket.firstResponseState = SlaTargetState.MET;
+    ticket.resolutionState = SlaTargetState.ON_TRACK;
+    ticket.resolvedAt = null;
+
+    const agent = request.agent(app.getHttpServer());
+    await agent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await agent
+      .patch(`/tickets/${ticket.id}/status`)
+      .send({ status: TicketStatus.RESOLVED })
+      .expect(200);
+    let stored = prismaMock.ticketStore.find(
+      (entry) => entry.id === ticket.id,
+    )!;
+    expect(stored.resolvedAt).not.toBeNull();
+    expect(stored.resolutionState).toBe(SlaTargetState.MET);
+
+    await agent
+      .patch(`/tickets/${ticket.id}/status`)
+      .send({ status: TicketStatus.OPEN })
+      .expect(200);
+    stored = prismaMock.ticketStore.find((entry) => entry.id === ticket.id)!;
+    expect(stored.resolvedAt).toBeNull();
+    expect(stored.resolutionState).toBe(SlaTargetState.ON_TRACK);
+    expect(stored.resolutionDueAt).not.toBeNull();
+    // The completed first-response target is untouched by reopen.
+    expect(stored.firstResponseState).toBe(SlaTargetState.MET);
+  });
+
+  it('hides SLA system events from the customer timeline', async () => {
+    const ownTicket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Own ticket detail',
+    )!;
+    prismaMock.ticketEventStore.push({
+      actorId: null,
+      createdAt: new Date('2026-04-22T10:00:00.000Z'),
+      id: randomUUID(),
+      metadata: { newState: 'BREACHED', target: 'FIRST_RESPONSE' },
+      ticketId: ownTicket.id,
+      type: TicketEventType.SLA_BREACHED,
+    });
+
+    const customer = request.agent(app.getHttpServer());
+    await customer
+      .post('/auth/login')
+      .send({ email: 'customer@demo.test', password: 'Password1!' })
+      .expect(200);
+    const response = await customer
+      .get(`/tickets/${ownTicket.id}/timeline`)
+      .expect(200);
+
+    const exposesSla = (
+      response.body.items as Array<{ eventType?: TicketEventType }>
+    ).some((item) => item.eventType === TicketEventType.SLA_BREACHED);
+    expect(exposesSla).toBe(false);
   });
 
   it('auto-routes a customer-created ticket with the Billing category to the Billing team', async () => {
@@ -2271,7 +2732,7 @@ describe('Tickets integration', () => {
     ).toBe(false);
   });
 
-  it('returns team tickets plus directly assigned tickets for a manager', async () => {
+  it('returns team, directly assigned, and globally unassigned tickets for a manager', async () => {
     const agent = request.agent(app.getHttpServer());
 
     await agent
@@ -2290,14 +2751,160 @@ describe('Tickets integration', () => {
       })
       .expect(200);
 
+    // Managers also see globally unassigned tickets (no team, no assignee) for
+    // triage: 'Own ticket detail' and 'Other customer ticket'.
     expect(
       response.body.items.map((ticket: { subject: string }) => ticket.subject),
     ).toEqual([
+      'Own ticket detail',
+      'Other customer ticket',
       'Team queue ticket',
       'Assigned ticket',
       'Urgent team ticket',
       'Manager direct assignment',
     ]);
+  });
+
+  // ---- Globally unassigned ticket triage visibility ----
+
+  it('lets a manager open a globally unassigned ticket for triage', async () => {
+    const ownTicket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Own ticket detail',
+    )!;
+    const manager = request.agent(app.getHttpServer());
+    await manager
+      .post('/auth/login')
+      .send({ email: 'manager@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const response = await manager.get(`/tickets/${ownTicket.id}`).expect(200);
+    expect(response.body.id).toBe(ownTicket.id);
+    expect(response.body.team).toBeNull();
+    expect(response.body.assignee).toBeNull();
+  });
+
+  it('hides globally unassigned tickets from an ordinary agent in list and detail', async () => {
+    const ownTicket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Own ticket detail',
+    )!;
+    const agent = request.agent(app.getHttpServer());
+    await agent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const list = await agent.get('/tickets').expect(200);
+    expect(
+      list.body.items.map((ticket: { subject: string }) => ticket.subject),
+    ).not.toContain('Own ticket detail');
+
+    await agent.get(`/tickets/${ownTicket.id}`).expect(403);
+  });
+
+  it('lets an admin list and open a globally unassigned ticket', async () => {
+    const ownTicket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Own ticket detail',
+    )!;
+    const admin = request.agent(app.getHttpServer());
+    await admin
+      .post('/auth/login')
+      .send({ email: 'admin@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    const list = await admin.get('/tickets').expect(200);
+    expect(
+      list.body.items.map((ticket: { subject: string }) => ticket.subject),
+    ).toContain('Own ticket detail');
+    await admin.get(`/tickets/${ownTicket.id}`).expect(200);
+  });
+
+  it('keeps the requester able to open their own globally unassigned ticket while denying unrelated customers', async () => {
+    const ownTicket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Own ticket detail',
+    )!;
+
+    const owner = request.agent(app.getHttpServer());
+    await owner
+      .post('/auth/login')
+      .send({ email: 'customer@demo.test', password: 'Password1!' })
+      .expect(200);
+    await owner.get(`/tickets/${ownTicket.id}`).expect(200);
+
+    const other = request.agent(app.getHttpServer());
+    await other
+      .post('/auth/login')
+      .send({ email: 'customer.two@demo.test', password: 'Password1!' })
+      .expect(200);
+    await other.get(`/tickets/${ownTicket.id}`).expect(403);
+  });
+
+  it('applies team visibility once a manager transfers an unassigned ticket to a team', async () => {
+    const ownTicket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Own ticket detail',
+    )!;
+    const technicalTeam = prismaMock.teamStore.find(
+      (team) => team.name === 'Technical Support',
+    )!;
+
+    const manager = request.agent(app.getHttpServer());
+    await manager
+      .post('/auth/login')
+      .send({ email: 'manager@demo.test', password: 'Password1!' })
+      .expect(200);
+    await manager
+      .patch(`/tickets/${ownTicket.id}/team`)
+      .send({ teamId: technicalTeam.id })
+      .expect(200);
+
+    // An agent on that team can now open it (team visibility), which they could
+    // not while it was globally unassigned.
+    const agent = request.agent(app.getHttpServer());
+    await agent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+    await agent.get(`/tickets/${ownTicket.id}`).expect(200);
+  });
+
+  it('lets an assigned agent access a previously unassigned ticket and keeps a single assignee on replacement', async () => {
+    const ownTicket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Own ticket detail',
+    )!;
+    const agentUser = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
+    )!;
+    const managerUser = prismaMock.userStore.find(
+      (user) => user.email === 'manager@demo.test',
+    )!;
+
+    const admin = request.agent(app.getHttpServer());
+    await admin
+      .post('/auth/login')
+      .send({ email: 'admin@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await admin
+      .patch(`/tickets/${ownTicket.id}/assign`)
+      .send({ assigneeId: agentUser.id })
+      .expect(200);
+
+    const agent = request.agent(app.getHttpServer());
+    await agent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+    await agent.get(`/tickets/${ownTicket.id}`).expect(200);
+
+    // Reassigning replaces the single assignee rather than adding a second.
+    const replaced = await admin
+      .patch(`/tickets/${ownTicket.id}/assign`)
+      .send({ assigneeId: managerUser.id })
+      .expect(200);
+    expect(replaced.body.assignee.id).toBe(managerUser.id);
+    expect(
+      prismaMock.ticketStore.find((entry) => entry.id === ownTicket.id)!
+        .assigneeId,
+    ).toBe(managerUser.id);
   });
 
   it('applies filters without widening admin visibility', async () => {
@@ -5069,5 +5676,248 @@ describe('Tickets integration', () => {
     const first = body[0] as { description?: unknown; subject?: unknown };
     expect(first).toHaveProperty('description');
     expect(first).not.toHaveProperty('subject');
+  });
+
+  describe('admin ticket trash (soft delete and restore)', () => {
+    const loginAs = async (email: string) => {
+      const httpAgent = request.agent(app.getHttpServer());
+      await httpAgent
+        .post('/auth/login')
+        .send({ email, password: 'Password1!' })
+        .expect(200);
+      return httpAgent;
+    };
+
+    const assignedTicket = () =>
+      prismaMock.ticketStore.find(
+        (entry) => entry.subject === 'Assigned ticket',
+      )!;
+
+    it('lets an admin move a ticket to the trash and hides it from every role', async () => {
+      const ticket = assignedTicket();
+
+      // The assigned agent can see the ticket before it is trashed.
+      const agentBefore = await loginAs('agent@demo.test');
+      await agentBefore.get(`/tickets/${ticket.id}`).expect(200);
+
+      const admin = await loginAs('admin@demo.test');
+      await admin.delete(`/tickets/${ticket.id}`).expect(204);
+
+      // The soft-delete markers are persisted; the row itself is kept.
+      const stored = prismaMock.ticketStore.find((e) => e.id === ticket.id)!;
+      expect(stored.deletedAt).toBeInstanceOf(Date);
+      expect(stored.deletedById).not.toBeNull();
+
+      // Hidden from the admin's own list and detail views (403 = exists but
+      // not visible through the normal path; the trash view is separate).
+      await admin.get(`/tickets/${ticket.id}`).expect(403);
+      const adminList = await admin.get('/tickets').expect(200);
+      expect(
+        (adminList.body.items as Array<{ id: string }>).some(
+          (item) => item.id === ticket.id,
+        ),
+      ).toBe(false);
+
+      // Hidden from agents, managers, and the requesting customer.
+      const agent = await loginAs('agent@demo.test');
+      await agent.get(`/tickets/${ticket.id}`).expect(403);
+      const manager = await loginAs('manager@demo.test');
+      await manager.get(`/tickets/${ticket.id}`).expect(403);
+      const requester = await loginAs('customer.two@demo.test');
+      await requester.get(`/tickets/${ticket.id}`).expect(403);
+    });
+
+    it('forbids non-admins from moving tickets to the trash', async () => {
+      const ticket = assignedTicket();
+
+      for (const email of [
+        'customer.two@demo.test',
+        'agent@demo.test',
+        'manager@demo.test',
+      ]) {
+        const httpAgent = await loginAs(email);
+        await httpAgent.delete(`/tickets/${ticket.id}`).expect(403);
+      }
+
+      const stored = prismaMock.ticketStore.find((e) => e.id === ticket.id)!;
+      expect(stored.deletedAt ?? null).toBeNull();
+    });
+
+    it('lists trashed tickets for admins only with the staff-only deletedAt marker', async () => {
+      const ticket = assignedTicket();
+
+      const admin = await loginAs('admin@demo.test');
+      await admin.delete(`/tickets/${ticket.id}`).expect(204);
+
+      const trash = await admin.get('/tickets/trash').expect(200);
+      const row = (
+        trash.body.items as Array<{ id: string; deletedAt: string | null }>
+      ).find((item) => item.id === ticket.id);
+      expect(row).toBeDefined();
+      expect(row?.deletedAt).not.toBeNull();
+
+      // The trash view is admin-only.
+      for (const email of [
+        'customer@demo.test',
+        'agent@demo.test',
+        'manager@demo.test',
+      ]) {
+        const httpAgent = await loginAs(email);
+        await httpAgent.get('/tickets/trash').expect(403);
+      }
+    });
+
+    it('restores a trashed ticket with its assignee, team, status, and history intact', async () => {
+      const ticket = assignedTicket();
+      ticket.status = TicketStatus.OPEN;
+      const originalAssignee = ticket.assigneeId;
+      const originalTeam = ticket.teamId;
+
+      // Seed conversation history so we can prove restore preserves it.
+      const agent = await loginAs('agent@demo.test');
+      await agent
+        .post(`/tickets/${ticket.id}/replies`)
+        .send({ body: 'Reply that must survive a trash/restore cycle.' })
+        .expect(201);
+
+      const messagesBefore = prismaMock.ticketMessageStore.filter(
+        (message) => message.ticketId === ticket.id,
+      ).length;
+      const eventsBefore = prismaMock.ticketEventStore.filter(
+        (event) => event.ticketId === ticket.id,
+      ).length;
+      expect(messagesBefore).toBeGreaterThan(0);
+
+      const admin = await loginAs('admin@demo.test');
+      await admin.delete(`/tickets/${ticket.id}`).expect(204);
+
+      const restored = await admin
+        .post(`/tickets/${ticket.id}/restore`)
+        .expect(200);
+      expect(restored.body.id).toBe(ticket.id);
+      expect(restored.body.assignee?.id ?? null).toBe(originalAssignee);
+      expect(restored.body.team?.id ?? null).toBe(originalTeam);
+      expect(restored.body.status).toBe(TicketStatus.OPEN);
+
+      // Trash markers are cleared and the relations are untouched.
+      const stored = prismaMock.ticketStore.find((e) => e.id === ticket.id)!;
+      expect(stored.deletedAt).toBeNull();
+      expect(stored.deletedById).toBeNull();
+      expect(stored.assigneeId).toBe(originalAssignee);
+      expect(stored.teamId).toBe(originalTeam);
+
+      // Messages and events are preserved exactly.
+      expect(
+        prismaMock.ticketMessageStore.filter(
+          (message) => message.ticketId === ticket.id,
+        ).length,
+      ).toBe(messagesBefore);
+      expect(
+        prismaMock.ticketEventStore.filter(
+          (event) => event.ticketId === ticket.id,
+        ).length,
+      ).toBe(eventsBefore);
+
+      // Visible again through the normal detail path; gone from the trash view.
+      await admin.get(`/tickets/${ticket.id}`).expect(200);
+      const trash = await admin.get('/tickets/trash').expect(200);
+      expect(
+        (trash.body.items as Array<{ id: string }>).some(
+          (item) => item.id === ticket.id,
+        ),
+      ).toBe(false);
+    });
+
+    it('forbids non-admins from restoring tickets', async () => {
+      const ticket = assignedTicket();
+      const admin = await loginAs('admin@demo.test');
+      await admin.delete(`/tickets/${ticket.id}`).expect(204);
+
+      for (const email of [
+        'customer.two@demo.test',
+        'agent@demo.test',
+        'manager@demo.test',
+      ]) {
+        const httpAgent = await loginAs(email);
+        await httpAgent.post(`/tickets/${ticket.id}/restore`).expect(403);
+      }
+
+      const stored = prismaMock.ticketStore.find((e) => e.id === ticket.id)!;
+      expect(stored.deletedAt).toBeInstanceOf(Date);
+    });
+
+    it('rejects every workflow mutation against a trashed ticket', async () => {
+      const ticket = assignedTicket();
+      ticket.status = TicketStatus.OPEN;
+
+      const admin = await loginAs('admin@demo.test');
+      await admin.delete(`/tickets/${ticket.id}`).expect(204);
+
+      const agent = await loginAs('agent@demo.test');
+      await agent
+        .post(`/tickets/${ticket.id}/replies`)
+        .send({ body: 'Should be rejected.' })
+        .expect(403);
+      await agent
+        .post(`/tickets/${ticket.id}/internal-notes`)
+        .send({ body: 'Should be rejected.' })
+        .expect(403);
+      await agent
+        .patch(`/tickets/${ticket.id}/status`)
+        .send({ status: TicketStatus.PENDING })
+        .expect(403);
+      await agent
+        .patch(`/tickets/${ticket.id}/assign`)
+        .send({ assigneeId: null })
+        .expect(403);
+      await agent.get(`/tickets/${ticket.id}/timeline`).expect(403);
+    });
+
+    it('returns conflict when trashing an already-trashed ticket or restoring a live one', async () => {
+      const ticket = assignedTicket();
+      const admin = await loginAs('admin@demo.test');
+
+      // Restoring a ticket that is not in the trash is a conflict.
+      await admin.post(`/tickets/${ticket.id}/restore`).expect(409);
+
+      await admin.delete(`/tickets/${ticket.id}`).expect(204);
+      // Trashing an already-trashed ticket is a conflict.
+      await admin.delete(`/tickets/${ticket.id}`).expect(409);
+    });
+
+    it('returns not found when trashing a ticket that does not exist', async () => {
+      const admin = await loginAs('admin@demo.test');
+      await admin.delete(`/tickets/${randomUUID()}`).expect(404);
+    });
+
+    it('writes audit log entries for trash and restore', async () => {
+      const ticket = assignedTicket();
+      const admin = await loginAs('admin@demo.test');
+
+      await admin.delete(`/tickets/${ticket.id}`).expect(204);
+      await admin.post(`/tickets/${ticket.id}/restore`).expect(200);
+
+      const ticketAudits = prismaMock.auditLogStore.filter(
+        (entry) => entry.targetId === ticket.id,
+      );
+      const actions = ticketAudits.map((entry) => entry.action);
+      expect(actions).toContain('admin.ticket.trashed');
+      expect(actions).toContain('admin.ticket.restored');
+      for (const entry of ticketAudits) {
+        expect(entry.targetType).toBe('Ticket');
+      }
+    });
+
+    it('emits realtime ticket updates on trash and restore', async () => {
+      const ticket = assignedTicket();
+      const admin = await loginAs('admin@demo.test');
+
+      await admin.delete(`/tickets/${ticket.id}`).expect(204);
+      expect(realtimeMock.emitTicketUpdated).toHaveBeenCalled();
+
+      realtimeMock.emitTicketUpdated.mockClear();
+      await admin.post(`/tickets/${ticket.id}/restore`).expect(200);
+      expect(realtimeMock.emitTicketUpdated).toHaveBeenCalled();
+    });
   });
 });
