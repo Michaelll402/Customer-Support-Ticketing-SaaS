@@ -1,6 +1,7 @@
 import {
   PrismaClient,
   RoleName,
+  SlaPlanAppliesTo,
   TicketEventType,
   TicketPriority,
   TicketStatus,
@@ -298,6 +299,27 @@ const seed = async () => {
     });
   }
 
+  // Default workspace SLA plan. ALL tickets are covered by a 1-hour first
+  // response target and a 24-hour resolution target (in minutes). The SLA
+  // engine (a later M5 slice) computes due dates from this plan; existing
+  // tickets are intentionally NOT given due dates here.
+  await prisma.slaPlan.upsert({
+    where: { name: 'Standard' },
+    update: {
+      appliesTo: SlaPlanAppliesTo.ALL,
+      firstResponseMinutes: 60,
+      isActive: true,
+      resolutionMinutes: 1440,
+    },
+    create: {
+      appliesTo: SlaPlanAppliesTo.ALL,
+      firstResponseMinutes: 60,
+      isActive: true,
+      name: 'Standard',
+      resolutionMinutes: 1440,
+    },
+  });
+
   const users = await prisma.user.findMany({
     where: {
       email: {
@@ -460,7 +482,7 @@ const seed = async () => {
   }
 
   console.log(
-    'Milestone 2 seed completed: auth users, teams, categories, tags, and demo tickets created.',
+    'Seed completed: auth users, teams, categories, tags, demo tickets, and the default SLA plan are in place.',
   );
 };
 

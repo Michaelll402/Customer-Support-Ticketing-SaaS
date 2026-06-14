@@ -52,7 +52,24 @@ No milestone may leave major half-built features behind.
   revocation via `User.tokenVersion` + `User.isActive` (the JWT strategy
   re-validates against the database and returns the fresh role). Requires the
   `user_active_token_version` Prisma migration.
-- **M5 has not started yet.** The next implementation step is focused M5 spec extraction.
+- **M5 is in progress.**
+  - **M5 Slice 0 (pre-M5 security hardening) is complete and committed:** auth
+    rate limiting on `/auth/login` and `/auth/register` (`@nestjs/throttler`),
+    a signed `Content-Disposition: attachment` override on attachment download
+    URLs, and a `GET /health/ready` readiness probe; Swagger is gated off in
+    production.
+  - **M5 Slice 1 (DB-05 schema + audit foundation) is implemented:** `SlaPlan`
+    and `AuditLog` models; `SlaPlanAppliesTo` / `SlaTargetState` enums and
+    `SLA_AT_RISK` / `SLA_BREACHED` `TicketEventType` values; Ticket SLA tracking
+    columns (`firstRespondedAt`, `resolvedAt`, `slaPlanId`, `firstResponseState`,
+    `resolutionState`) plus scanner indexes; `isActive` archival flags on Team,
+    Category, and Tag; an `AuditService.record(...)` foundation (no controller,
+    no endpoints, no interception); and a default "Standard" SLA plan in the
+    seed. The additive `sla_audit_foundation_db05` migration is **created but
+    not yet applied** to Neon, and existing tickets are **not** backfilled with
+    SLA due dates.
+  - **Remaining M5 slices are pending:** SLA engine, reports/dashboards, admin
+    CRUD, and the admin/audit read surfaces.
 - The database/backend M1 lean-auth slice is implemented:
   - `DB-01` - Identity schema for `Role` and `User`
   - `BE-01` - Auth endpoints, JWT cookie auth, role guards, seed roles/users, backend tests

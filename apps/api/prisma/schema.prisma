@@ -42,6 +42,8 @@ enum TicketEventType {
   REPLIED
   NOTE_ADDED
   ATTACHMENT_ADDED
+  SLA_AT_RISK
+  SLA_BREACHED
 }
 
 enum NotificationType {
@@ -51,6 +53,19 @@ enum NotificationType {
   NOTE_ADDED
   SLA_AT_RISK
   SLA_BREACHED
+}
+
+enum SlaPlanAppliesTo {
+  ALL
+  PRIORITY
+  CATEGORY
+}
+
+enum SlaTargetState {
+  ON_TRACK
+  AT_RISK
+  BREACHED
+  MET
 }
 
 model Role {
@@ -78,12 +93,14 @@ model User {
   ticketMessages      TicketMessage[] @relation("TicketMessageAuthor")
   uploadedAttachments Attachment[]    @relation("AttachmentUploader")
   notifications       Notification[]
+  auditLogs           AuditLog[]
 }
 
 model Team {
   id          String       @id @default(uuid()) @db.Uuid
   name        String       @unique
   description String?      @db.Text
+  isActive    Boolean      @default(true)
   createdAt   DateTime     @default(now())
   members     TeamMember[]
   tickets     Ticket[]
@@ -103,18 +120,21 @@ model TeamMember {
 }
 
 model Category {
-  id          String   @id @default(uuid()) @db.Uuid
-  name        String   @unique
-  description String?  @db.Text
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String    @unique
+  description String?   @db.Text
   color       String?
-  createdAt   DateTime @default(now())
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
   tickets     Ticket[]
+  slaPlans    SlaPlan[]
 }
 
 model Tag {
   id          String      @id @default(uuid()) @db.Uuid
   name        String      @unique
   color       String?
+  isActive    Boolean     @default(true)
   ticketLinks TicketTag[]
 }
 
@@ -131,12 +151,18 @@ model Ticket {
   categoryId         String?         @db.Uuid
   firstResponseDueAt DateTime?
   resolutionDueAt    DateTime?
+  firstRespondedAt   DateTime?
+  resolvedAt         DateTime?
+  slaPlanId          String?         @db.Uuid
+  firstResponseState SlaTargetState  @default(ON_TRACK)
+  resolutionState    SlaTargetState  @default(ON_TRACK)
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
   requester          User            @relation("RequestedTickets", fields: [requesterId], references: [id], onDelete: Restrict)
   assignee           User?           @relation("AssignedTickets", fields: [assigneeId], references: [id], onDelete: SetNull)
   team               Team?           @relation(fields: [teamId], references: [id], onDelete: SetNull)
   category           Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  slaPlan            SlaPlan?        @relation(fields: [slaPlanId], references: [id], onDelete: SetNull)
   tags               TicketTag[]
   events             TicketEvent[]
   messages           TicketMessage[]
@@ -151,6 +177,9 @@ model Ticket {
   @@index([priority])
   @@index([createdAt])
   @@index([updatedAt])
+  @@index([firstResponseState, firstResponseDueAt])
+  @@index([resolutionState, resolutionDueAt])
+  @@index([slaPlanId])
 }
 
 model TicketTag {
@@ -228,4 +257,39 @@ model Notification {
   @@index([userId, isRead, createdAt])
   @@index([userId, createdAt])
   @@index([ticketId])
+}
+
+model SlaPlan {
+  id                   String           @id @default(uuid()) @db.Uuid
+  name                 String           @unique
+  firstResponseMinutes Int
+  resolutionMinutes    Int
+  appliesTo            SlaPlanAppliesTo @default(ALL)
+  priority             TicketPriority?
+  categoryId           String?          @db.Uuid
+  isActive             Boolean          @default(true)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  category             Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  tickets              Ticket[]
+
+  @@index([appliesTo, isActive])
+  @@index([categoryId])
+  @@index([priority])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @db.Uuid
+  action     String
+  targetType String
+  targetId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([actorId])
+  @@index([action])
+  @@index([targetType, targetId])
 }

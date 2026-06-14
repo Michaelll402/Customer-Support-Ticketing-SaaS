@@ -127,7 +127,7 @@ The backend is a modular monolith. Milestone 0 established the repo foundation, 
 - Advanced workflow automation
 - Attachment cleanup jobs
 
-Milestone 4 is complete. Milestone 5 has not started yet.
+Milestone 4 is complete. Milestone 5 is in progress: the Slice 0 security hardening is complete and the Slice 1 DB-05 schema + audit foundation is implemented (migration created but not yet applied); the SLA engine, reports/dashboards, and admin CRUD remain pending.
 
 ## Roles
 
@@ -328,7 +328,7 @@ Frontend session state is derived from `/auth/me`, not from client-side token st
 - **M4**: Workflow actions, notifications, realtime _(complete)_
 - **M4.5**: Post-audit security/privacy/reliability hardening _(complete; no new product scope)_
 - **M4.6**: Pre-M5 hardening — atomic status transitions, CSRF Origin guard, JWT revocation (`tokenVersion`/`isActive`) _(complete; mechanism only, no admin endpoints)_
-- **M5**: SLA, dashboards, admin controls _(not started)_
+- **M5**: SLA, dashboards, admin controls _(in progress — Slice 0 security hardening complete; Slice 1 DB-05 schema + audit foundation implemented, migration created but not yet applied; SLA engine / reports / admin CRUD pending)_
 - **M6**: Testing hardening, polish, deployment _(not started)_
 
 Next planned milestone after M4 completion: **M5 SLA, Dashboards & Admin Controls**.

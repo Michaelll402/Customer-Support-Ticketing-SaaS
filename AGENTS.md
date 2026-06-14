@@ -32,7 +32,18 @@ Read these files before making changes:
   `User.isActive` (the JWT strategy now re-validates against the database and
   returns the fresh role). Mechanism only — admin role-change endpoints remain
   M5. Requires the `user_active_token_version` migration.
-- Milestone 5 has not started yet
+- Milestone 5 is in progress:
+  - Slice 0 (pre-M5 security hardening) is complete and committed: auth rate
+    limiting, attachment `Content-Disposition`, readiness probe, production
+    Swagger gate.
+  - Slice 1 (DB-05 schema + audit foundation) is implemented: `SlaPlan` and
+    `AuditLog` models, SLA enums + `TicketEventType` SLA values, Ticket SLA
+    tracking columns + indexes, `isActive` on Team/Category/Tag, an
+    `AuditService.record(...)` foundation (no endpoints), and a default SLA plan
+    seed. The additive `sla_audit_foundation_db05` migration is created but not
+    yet applied to Neon; existing tickets are not backfilled.
+  - Remaining slices (SLA engine, reports/dashboards, admin CRUD, audit read
+    surface) are pending.
 - M1 delivered:
   - `DB-01` identity schema for `Role` and `User`
   - `BE-01` lean auth foundation: register, login, logout, `/auth/me`, JWT cookie auth,
