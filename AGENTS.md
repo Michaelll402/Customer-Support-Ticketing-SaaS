@@ -42,8 +42,27 @@ Read these files before making changes:
     `AuditService.record(...)` foundation (no endpoints), and a default SLA plan
     seed. The additive `sla_audit_foundation_db05` migration is created but not
     yet applied to Neon; existing tickets are not backfilled.
-  - Remaining slices (SLA engine, reports/dashboards, admin CRUD, audit read
-    surface) are pending.
+  - Slice 2 (SLA engine) is implemented: `SlaService` computes wall-clock SLA
+    due dates from the matching plan on creation; first staff public reply stops
+    the first-response clock; resolve/reopen drive the resolution clock; a 60s
+    BullMQ repeatable scan flips ON_TRACK -> AT_RISK at 80% and -> BREACHED at
+    due via guarded idempotent transitions, emitting SLA timeline events,
+    deduped notifications (assignee + team managers, never the requester), and
+    `ticket.updated`. SLA fields/events are staff-only. Wall-clock MVP;
+    business-hours/pause/escalation deferred.
+  - Admin ticket trash (soft delete + restore) is implemented (cross-cutting):
+    `Ticket.deletedAt`/`deletedById` (additive `20260613140000_ticket_soft_delete`
+    migration, not yet applied to Neon); a single `deletedAt: null` in
+    `buildVisibilityWhere` hides trashed tickets from every role's
+    list/detail/mutations (403) and from the SLA scanner; admin-only
+    `DELETE /tickets/:id` (204 soft delete), `POST /tickets/:id/restore` (200),
+    `GET /tickets/trash`; trash/restore write `AuditLog` rows + emit
+    `ticket.updated`; restore preserves all history with one assignee unchanged;
+    admin-only UI (detail two-step Move to Trash + `/tickets/trash` restore view +
+    nav). Permanent hard delete is deferred — see
+    `docs/ticket-trash-and-permanent-purge.md`.
+  - Remaining slices (reports/dashboards, admin CRUD, audit read surface, SLA
+    indicator UI) are pending.
 - M1 delivered:
   - `DB-01` identity schema for `Role` and `User`
   - `BE-01` lean auth foundation: register, login, logout, `/auth/me`, JWT cookie auth,

@@ -20,6 +20,9 @@ import {
   getTicketTeams,
   getTicketTimeline,
   getTickets,
+  getTrashedTickets,
+  moveTicketToTrash,
+  restoreTicket,
   transferTicketTeam,
   updateTicketCategory,
   updateTicketPriority,
@@ -56,6 +59,24 @@ const invalidateTicketWorkflowCaches = async (
       queryKey: ['tickets', 'detail', ticketId],
     }),
     queryClient.invalidateQueries({ queryKey: ['tickets', 'list'] }),
+    queryClient.invalidateQueries({
+      queryKey: ['tickets', 'timeline', ticketId],
+    }),
+  ]);
+};
+
+// Trash and restore move a ticket between the active queue and the admin trash
+// view, so both lists (plus the detail/timeline) need to be refreshed.
+const invalidateTicketTrashCaches = async (
+  queryClient: QueryClient,
+  ticketId: string,
+) => {
+  await Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: ['tickets', 'detail', ticketId],
+    }),
+    queryClient.invalidateQueries({ queryKey: ['tickets', 'list'] }),
+    queryClient.invalidateQueries({ queryKey: ['tickets', 'trash'] }),
     queryClient.invalidateQueries({
       queryKey: ['tickets', 'timeline', ticketId],
     }),
@@ -221,5 +242,31 @@ export const useTransferTicketTeam = (ticketId: string) => {
     mutationFn: (input: TransferTicketTeamInput) =>
       transferTicketTeam(ticketId, input),
     onSuccess: () => invalidateTicketWorkflowCaches(queryClient, ticketId),
+  });
+};
+
+export const useTrashedTickets = (query: TicketListQuery, enabled = true) =>
+  useQuery({
+    enabled,
+    queryKey: ['tickets', 'trash', query],
+    queryFn: () => getTrashedTickets(query),
+    placeholderData: keepPreviousData,
+  });
+
+export const useMoveTicketToTrash = (ticketId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => moveTicketToTrash(ticketId),
+    onSuccess: () => invalidateTicketTrashCaches(queryClient, ticketId),
+  });
+};
+
+export const useRestoreTicket = (ticketId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => restoreTicket(ticketId),
+    onSuccess: () => invalidateTicketTrashCaches(queryClient, ticketId),
   });
 };

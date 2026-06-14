@@ -94,6 +94,7 @@ The backend is a modular monolith. Milestone 0 established the repo foundation, 
 - `PATCH /tickets/:id/category` (staff workflow)
 - `PATCH /tickets/:id/team` (staff workflow; emits `TEAM_TRANSFERRED` ticket event)
 - `GET /tickets/tags`, `GET /tickets/teams`, `GET /tickets/:id/assignable-users` (read-only workflow options for staff)
+- `DELETE /tickets/:id`, `POST /tickets/:id/restore`, `GET /tickets/trash` (admin-only ticket trash: reversible soft delete + restore; trashed tickets are hidden from every role's list/detail/mutations and from the SLA scanner; trash/restore write `AuditLog` rows and emit `ticket.updated`; permanent hard delete is deferred — see `docs/ticket-trash-and-permanent-purge.md`)
 - `GET /notifications`, `PATCH /notifications/:id/read`, `PATCH /notifications/read-all`
 - BullMQ notification queue producer (Redis-backed, skipped in test env, idempotent jobIds, REST never blocks on queue failures)
 - Socket.IO realtime gateway with JWT-cookie handshake, `user:{id}` / `ticket:{id}` / `ticket:{id}:staff` rooms, and four server events (`notification.created`, `ticket.updated`, `ticket.message.created.public`, `ticket.message.created.internal`); customers never join staff rooms
@@ -272,9 +273,12 @@ Available now:
 - `GET /tickets/categories`
 - `GET /tickets/tags`
 - `GET /tickets/teams`
+- `GET /tickets/trash` (admin only)
 - `GET /tickets/:id`
 - `GET /tickets/:id/assignable-users`
 - `PATCH /tickets/:id`
+- `DELETE /tickets/:id` (admin only; move to trash)
+- `POST /tickets/:id/restore` (admin only)
 - `PATCH /tickets/:id/assign`
 - `PATCH /tickets/:id/status`
 - `PATCH /tickets/:id/priority`
@@ -328,7 +332,7 @@ Frontend session state is derived from `/auth/me`, not from client-side token st
 - **M4**: Workflow actions, notifications, realtime _(complete)_
 - **M4.5**: Post-audit security/privacy/reliability hardening _(complete; no new product scope)_
 - **M4.6**: Pre-M5 hardening — atomic status transitions, CSRF Origin guard, JWT revocation (`tokenVersion`/`isActive`) _(complete; mechanism only, no admin endpoints)_
-- **M5**: SLA, dashboards, admin controls _(in progress — Slice 0 security hardening complete; Slice 1 DB-05 schema + audit foundation implemented, migration created but not yet applied; SLA engine / reports / admin CRUD pending)_
+- **M5**: SLA, dashboards, admin controls _(in progress — Slice 0 security hardening complete; Slice 1 DB-05 schema + audit foundation and Slice 2 SLA engine implemented (wall-clock SLA: due dates, first-response/resolution lifecycle, 60s BullMQ scan with at-risk/breach events, staff-only notifications + serialization); reports / admin CRUD / SLA UI pending)_
 - **M6**: Testing hardening, polish, deployment _(not started)_
 
 Next planned milestone after M4 completion: **M5 SLA, Dashboards & Admin Controls**.

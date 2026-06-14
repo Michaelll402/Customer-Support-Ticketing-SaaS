@@ -3,6 +3,7 @@ import type { UserRole } from '@/lib/auth';
 export const appRoutePaths = [
   '/dashboard',
   '/tickets',
+  '/tickets/trash',
   '/settings',
   '/profile',
 ] as const;

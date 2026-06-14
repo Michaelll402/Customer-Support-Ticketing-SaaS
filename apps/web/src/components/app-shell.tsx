@@ -110,10 +110,14 @@ export const AppShell = ({ children }: AppShellProps) => {
 
   const user = currentUserQuery.data;
   const items = getAppShellItems(user.role);
-  const activeItem =
-    items.find(
-      (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
-    ) ?? null;
+  // Pick the most specific matching nav item so nested routes such as
+  // /tickets/trash highlight "Trash" rather than also matching "/tickets".
+  const activeHref =
+    items
+      .map((item) => item.href)
+      .filter((href) => pathname === href || pathname.startsWith(`${href}/`))
+      .sort((left, right) => right.length - left.length)[0] ?? null;
+  const activeItem = items.find((item) => item.href === activeHref) ?? null;
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(14,165,233,0.12),_transparent_32%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)] text-slate-950">
@@ -145,9 +149,7 @@ export const AppShell = ({ children }: AppShellProps) => {
           <nav aria-label="Primary" className="mt-6">
             <ul className="grid gap-3">
               {items.map((item) => {
-                const isActive =
-                  pathname === item.href ||
-                  pathname.startsWith(`${item.href}/`);
+                const isActive = item.href === activeHref;
 
                 return (
                   <li key={item.href}>

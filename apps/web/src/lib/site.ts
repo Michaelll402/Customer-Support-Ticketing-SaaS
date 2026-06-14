@@ -20,6 +20,8 @@ const appRouteDescriptions: Record<AppRoutePath, string> = {
     'Admin configuration screens remain placeholder-only until Milestone 5.',
   '/tickets':
     'Ticket list, filters, sorting, pagination, customer ticket creation, conversation, notes, attachments, staff workflow controls, in-app notifications, and realtime invalidation are available.',
+  '/tickets/trash':
+    'Admin-only trash: review soft-deleted tickets and restore them with their full conversation, workflow, and SLA history intact.',
 };
 
 const appRouteLabelsByRole: Record<
@@ -31,6 +33,7 @@ const appRouteLabelsByRole: Record<
     '/profile': 'Profile',
     '/settings': 'Settings',
     '/tickets': 'Ticket Queue',
+    '/tickets/trash': 'Trash',
   },
   AGENT: {
     '/profile': 'Profile',

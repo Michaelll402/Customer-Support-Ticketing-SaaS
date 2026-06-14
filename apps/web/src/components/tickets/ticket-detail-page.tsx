@@ -9,12 +9,14 @@ import {
   type ReactNode,
 } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 import { useCurrentUser } from '@/hooks/use-auth';
 import { useTicketRealtimeSubscription } from '@/hooks/use-realtime';
 import {
   useCreateTicketInternalNote,
   useCreateTicketPublicReply,
+  useMoveTicketToTrash,
   useTicket,
   useTicketAttachmentDownloadUrl,
   useTicketTimeline,
@@ -1011,6 +1013,89 @@ const TicketTimeline = ({ ticketId }: { ticketId: string }) => {
   );
 };
 
+const TicketTrashControl = ({ ticket }: { ticket: TicketDetailResponse }) => {
+  const router = useRouter();
+  const moveToTrashMutation = useMoveTicketToTrash(ticket.id);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const handleConfirm = async () => {
+    setErrorMessage(null);
+
+    try {
+      await moveToTrashMutation.mutateAsync();
+      // The ticket is now hidden from every active queue, so send the admin to
+      // the trash view where it can be reviewed or restored.
+      router.push('/tickets/trash');
+    } catch (error) {
+      setErrorMessage(
+        getApiErrorMessage(
+          error,
+          'The ticket could not be moved to the trash.',
+        ),
+      );
+      setIsConfirming(false);
+    }
+  };
+
+  if (!isConfirming) {
+    return (
+      <div className="flex flex-col items-stretch gap-2">
+        <button
+          className="inline-flex items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+          onClick={() => {
+            setErrorMessage(null);
+            setIsConfirming(true);
+          }}
+          type="button"
+        >
+          Move to Trash
+        </button>
+        {errorMessage ? (
+          <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+            {errorMessage}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-[1.25rem] border border-rose-200 bg-rose-50 px-4 py-4 lg:max-w-sm">
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-rose-700">
+        Move ticket #{ticket.number} to Trash?
+      </p>
+      <p className="mt-2 text-sm leading-6 text-rose-900">
+        This soft-deletes the ticket. It disappears from every active queue and
+        from customer, agent, and manager access. You can restore it from the
+        admin Trash with its full history — it is not permanently deleted.
+      </p>
+      <div className="mt-4 flex flex-wrap gap-3">
+        <button
+          className="inline-flex items-center justify-center rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={moveToTrashMutation.isPending}
+          onClick={() => {
+            void handleConfirm();
+          }}
+          type="button"
+        >
+          {moveToTrashMutation.isPending ? 'Moving…' : 'Confirm move to Trash'}
+        </button>
+        <button
+          className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={moveToTrashMutation.isPending}
+          onClick={() => {
+            setIsConfirming(false);
+          }}
+          type="button"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+};
+
 export const TicketDetailPage = ({ ticketId }: { ticketId: string }) => {
   const ticketQuery = useTicket(ticketId);
   const currentUserQuery = useCurrentUser();
@@ -1126,12 +1211,17 @@ export const TicketDetailPage = ({ ticketId }: { ticketId: string }) => {
             </p>
           </div>
 
-          <Link
-            className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-            href="/tickets"
-          >
-            Back to tickets
-          </Link>
+          <div className="flex flex-col items-stretch gap-3 lg:items-end">
+            <Link
+              className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              href="/tickets"
+            >
+              Back to tickets
+            </Link>
+            {currentUserRole === 'ADMIN' ? (
+              <TicketTrashControl ticket={ticket} />
+            ) : null}
+          </div>
         </div>
 
         <div className="mt-6 flex flex-wrap items-center gap-3">

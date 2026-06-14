@@ -153,6 +153,9 @@ export const ticketListItemSchema = z.object({
   assignee: ticketListUserSummarySchema.nullable(),
   team: ticketListTeamSummarySchema.nullable(),
   category: ticketListCategorySummarySchema.nullable(),
+  // Staff-only marker. Absent from normal list rows; present (a timestamp) on
+  // the admin trash listing so trashed rows can show when they were removed.
+  deletedAt: z.string().datetime().nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -216,8 +219,10 @@ export const ticketDetailResponseSchema = z.object({
   team: ticketDetailTeamSummarySchema.nullable(),
   category: ticketDetailCategorySummarySchema.nullable(),
   tags: z.array(ticketDetailTagSummarySchema),
-  firstResponseDueAt: z.string().datetime().nullable(),
-  resolutionDueAt: z.string().datetime().nullable(),
+  // SLA fields are staff-only on the API now, so they are absent from
+  // customer responses. Slice 6 adds the SLA indicator UI.
+  firstResponseDueAt: z.string().datetime().nullable().optional(),
+  resolutionDueAt: z.string().datetime().nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -466,10 +471,43 @@ export const getTickets = async (query: TicketListQuery) => {
   return ticketListResponseSchema.parse(response);
 };
 
+export const getTrashedTickets = async (query: TicketListQuery) => {
+  const params = buildTicketListSearchParams(query);
+  const path = params.toString()
+    ? `/tickets/trash?${params.toString()}`
+    : '/tickets/trash';
+
+  const response = await apiRequest<TicketListResponse>(path, {
+    cache: 'no-store',
+  });
+
+  return ticketListResponseSchema.parse(response);
+};
+
 export const getTicketById = async (ticketId: string) => {
   const response = await apiRequest<TicketDetailResponse>(
     `/tickets/${ticketId}`,
     {
+      cache: 'no-store',
+    },
+  );
+
+  return ticketDetailResponseSchema.parse(response);
+};
+
+export const moveTicketToTrash = async (ticketId: string) => {
+  // DELETE returns 204 No Content; there is no response body to parse.
+  await apiRequest<void>(`/tickets/${ticketId}`, {
+    method: 'DELETE',
+    cache: 'no-store',
+  });
+};
+
+export const restoreTicket = async (ticketId: string) => {
+  const response = await apiRequest<TicketDetailResponse>(
+    `/tickets/${ticketId}/restore`,
+    {
+      method: 'POST',
       cache: 'no-store',
     },
   );

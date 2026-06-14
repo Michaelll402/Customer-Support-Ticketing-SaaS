@@ -3,7 +3,7 @@
 **Project**: Customer Support / Ticketing SaaS
 **Version**: 1.1.0
 **Created**: 2026-04-04
-**Last Updated**: 2026-05-14
+**Last Updated**: 2026-06-14
 **Status**: Active
 
 ---
@@ -68,8 +68,34 @@ No milestone may leave major half-built features behind.
     seed. The additive `sla_audit_foundation_db05` migration is **created but
     not yet applied** to Neon, and existing tickets are **not** backfilled with
     SLA due dates.
-  - **Remaining M5 slices are pending:** SLA engine, reports/dashboards, admin
-    CRUD, and the admin/audit read surfaces.
+  - **M5 Slice 2 (SLA engine) is implemented:** an `SlaService` computes
+    wall-clock SLA due dates from the matching plan (CATEGORY > PRIORITY > ALL,
+    deterministic) on ticket creation; the first public staff reply stops the
+    first-response clock and resolve/reopen drive the resolution clock; a BullMQ
+    repeatable scan (every 60s, Upstash-friendly) moves targets ON_TRACK ->
+    AT_RISK at 80% of the window and -> BREACHED at the due time via guarded,
+    idempotent transitions, emitting `SLA_AT_RISK`/`SLA_BREACHED` timeline
+    events, deduplicated notifications (`sla:{ticketId}:{target}:{state}`) to the
+    assignee and team managers (never the requester), and `ticket.updated`
+    realtime. All SLA fields and SLA timeline events are **staff-only**;
+    customers receive none of them. **Wall-clock only** — business-hours
+    calendars, holidays, pause-on-pending, and escalations remain deferred.
+  - **Admin ticket trash (soft delete + restore) is implemented** (cross-cutting,
+    requested before the next milestone): `Ticket.deletedAt` / `deletedById`
+    columns (additive `20260613140000_ticket_soft_delete` migration, **not yet
+    applied to Neon**); a single `deletedAt: null` exclusion in
+    `buildVisibilityWhere` hides trashed tickets from every role's list, detail,
+    and all workflow mutations (403), and from the SLA scanner; admin-only
+    `DELETE /tickets/:id` (204), `POST /tickets/:id/restore` (200), and
+    `GET /tickets/trash`; trash/restore write `AuditLog` rows and emit
+    `ticket.updated`; restore preserves all messages/events/attachments/team/
+    assignee/status/SLA history with one assignee unchanged; admin-only UI
+    (detail-page two-step "Move to Trash" + `/tickets/trash` restore view + nav
+    link). **Permanent hard delete is intentionally deferred** — see
+    `docs/ticket-trash-and-permanent-purge.md` for the inspected relation/cascade
+    map and the storage-first purge design.
+  - **Remaining M5 slices are pending:** reports/dashboards, admin CRUD, the
+    admin/audit read surfaces, and the SLA indicator UI.
 - The database/backend M1 lean-auth slice is implemented:
   - `DB-01` - Identity schema for `Role` and `User`
   - `BE-01` - Auth endpoints, JWT cookie auth, role guards, seed roles/users, backend tests
