@@ -9,6 +9,7 @@ import { validateApiEnv } from './common/config/env.validation';
 import { createPinoConfig } from './common/logging/pino.config';
 import {
   AdminModule,
+  AssignmentRequestsModule,
   AttachmentsModule,
   AuditModule,
   AuthModule,
@@ -36,6 +37,7 @@ import {
     AuthModule,
     UsersModule,
     TicketsModule,
+    AssignmentRequestsModule,
     NotificationsModule,
     AttachmentsModule,
     SlaModule,

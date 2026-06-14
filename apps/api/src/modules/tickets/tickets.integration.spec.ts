@@ -4595,12 +4595,12 @@ describe('Tickets integration', () => {
     },
   );
 
-  it('allows an agent to assign a team-member staff user and writes an ASSIGNED event', async () => {
+  it('allows an agent to claim an unassigned team ticket for themselves', async () => {
     const ticket = prismaMock.ticketStore.find(
       (entry) => entry.subject === 'Urgent team ticket',
     )!;
-    const manager = prismaMock.userStore.find(
-      (user) => user.email === 'manager@demo.test',
+    const agent = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
     )!;
     const httpAgent = request.agent(app.getHttpServer());
 
@@ -4611,10 +4611,10 @@ describe('Tickets integration', () => {
 
     const response = await httpAgent
       .patch(`/tickets/${ticket.id}/assign`)
-      .send({ assigneeId: manager.id })
+      .send({ assigneeId: agent.id })
       .expect(200);
 
-    expect(response.body.assignee).toMatchObject({ id: manager.id });
+    expect(response.body.assignee).toMatchObject({ id: agent.id });
     expect(
       prismaMock.ticketEventStore.find(
         (event) =>
@@ -4622,6 +4622,91 @@ describe('Tickets integration', () => {
           event.type === TicketEventType.ASSIGNED,
       ),
     ).toBeDefined();
+  });
+
+  it('forbids an agent from directly reassigning an owned ticket to another staff user (must request)', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Urgent team ticket',
+    )!;
+    const agent = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
+    )!;
+    // The manager is also a technical-team member, standing in for any other
+    // staff target. The restriction is role-agnostic: any non-self-claim fails.
+    const otherStaff = prismaMock.userStore.find(
+      (user) => user.email === 'manager@demo.test',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    // Claiming it for themselves is allowed.
+    await httpAgent
+      .patch(`/tickets/${ticket.id}/assign`)
+      .send({ assigneeId: agent.id })
+      .expect(200);
+
+    // Reassigning the now-owned ticket to someone else is forbidden.
+    await httpAgent
+      .patch(`/tickets/${ticket.id}/assign`)
+      .send({ assigneeId: otherStaff.id })
+      .expect(403);
+  });
+
+  it('forbids an agent from stealing a ticket already assigned to another staff user', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Assigned ticket',
+    )!;
+    const agent = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
+    )!;
+    // 'Assigned ticket' is assigned to the agent in the seed; reassign it to the
+    // manager first (via admin) so the agent is no longer the owner.
+    const manager = prismaMock.userStore.find(
+      (user) => user.email === 'manager@demo.test',
+    )!;
+    const admin = request.agent(app.getHttpServer());
+    await admin
+      .post('/auth/login')
+      .send({ email: 'admin@demo.test', password: 'Password1!' })
+      .expect(200);
+    await admin
+      .patch(`/tickets/${ticket.id}/assign`)
+      .send({ assigneeId: manager.id })
+      .expect(200);
+
+    const httpAgent = request.agent(app.getHttpServer());
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    // The agent cannot claim/steal a ticket owned by someone else.
+    await httpAgent
+      .patch(`/tickets/${ticket.id}/assign`)
+      .send({ assigneeId: agent.id })
+      .expect(403);
+  });
+
+  it('forbids an agent from returning an owned ticket to the queue directly', async () => {
+    const ticket = prismaMock.ticketStore.find(
+      (entry) => entry.subject === 'Assigned ticket',
+    )!;
+    const httpAgent = request.agent(app.getHttpServer());
+
+    // 'Assigned ticket' is assigned to the agent in the seed.
+    await httpAgent
+      .post('/auth/login')
+      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .expect(200);
+
+    await httpAgent
+      .patch(`/tickets/${ticket.id}/assign`)
+      .send({ assigneeId: null })
+      .expect(403);
   });
 
   it('allows a manager to assign a team-member staff user on a team-owned ticket', async () => {
@@ -4677,9 +4762,11 @@ describe('Tickets integration', () => {
     )!;
     const httpAgent = request.agent(app.getHttpServer());
 
+    // A manager performs the direct assignment so the role-level 400 (customer
+    // is not staff) is exercised rather than the agent-only 403 restriction.
     await httpAgent
       .post('/auth/login')
-      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .send({ email: 'manager@demo.test', password: 'Password1!' })
       .expect(200);
 
     await httpAgent
@@ -4688,7 +4775,7 @@ describe('Tickets integration', () => {
       .expect(400);
   });
 
-  it('rejects an agent assigning a staff user who is not on the ticket team with 400', async () => {
+  it('rejects assigning a staff user who is not on the ticket team with 400', async () => {
     const ticket = prismaMock.ticketStore.find(
       (entry) => entry.subject === 'Urgent team ticket',
     )!;
@@ -4697,9 +4784,10 @@ describe('Tickets integration', () => {
     )!;
     const httpAgent = request.agent(app.getHttpServer());
 
+    // Manager on the technical team cannot assign a billing-team agent.
     await httpAgent
       .post('/auth/login')
-      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .send({ email: 'manager@demo.test', password: 'Password1!' })
       .expect(200);
 
     await httpAgent
@@ -5344,25 +5432,26 @@ describe('Tickets integration', () => {
     const ticket = prismaMock.ticketStore.find(
       (entry) => entry.subject === 'Urgent team ticket',
     )!;
-    const manager = prismaMock.userStore.find(
-      (user) => user.email === 'manager@demo.test',
+    const agent = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
     )!;
     const httpAgent = request.agent(app.getHttpServer());
 
+    // A manager directly assigns a team agent; the agent receives the notice.
     await httpAgent
       .post('/auth/login')
-      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .send({ email: 'manager@demo.test', password: 'Password1!' })
       .expect(200);
 
     await httpAgent
       .patch(`/tickets/${ticket.id}/assign`)
-      .send({ assigneeId: manager.id })
+      .send({ assigneeId: agent.id })
       .expect(200);
 
     expect(queueMock.enqueueNotification).toHaveBeenCalledTimes(1);
     const [payload, jobId] = queueMock.enqueueNotification.mock.calls[0]!;
     expect(payload.type).toBe(NotificationType.TICKET_ASSIGNED);
-    expect(payload.recipientUserIds).toEqual([manager.id]);
+    expect(payload.recipientUserIds).toEqual([agent.id]);
     expect(typeof jobId).toBe('string');
   });
 
@@ -5492,19 +5581,21 @@ describe('Tickets integration', () => {
     const ticket = prismaMock.ticketStore.find(
       (entry) => entry.subject === 'Urgent team ticket',
     )!;
-    const manager = prismaMock.userStore.find(
-      (user) => user.email === 'manager@demo.test',
+    const agent = prismaMock.userStore.find(
+      (user) => user.email === 'agent@demo.test',
     )!;
     const httpAgent = request.agent(app.getHttpServer());
 
+    // A manager directly assigns a team agent, which enqueues TICKET_ASSIGNED;
+    // the rejected enqueue must stay non-fatal.
     await httpAgent
       .post('/auth/login')
-      .send({ email: 'agent@demo.test', password: 'Password1!' })
+      .send({ email: 'manager@demo.test', password: 'Password1!' })
       .expect(200);
 
     await httpAgent
       .patch(`/tickets/${ticket.id}/assign`)
-      .send({ assigneeId: manager.id })
+      .send({ assigneeId: agent.id })
       .expect(200);
 
     expect(

@@ -874,6 +874,22 @@ export class TicketsService {
       return this.loadTicketDetail(ticketId);
     }
 
+    // Agents may only CLAIM a currently-unassigned ticket for themselves. They
+    // cannot reassign an owned ticket to someone else, assign to a manager,
+    // steal an already-assigned ticket, or return one to the queue directly —
+    // those require an assignment request that a manager/admin approves. Server-
+    // side enforcement; the frontend hiding is only a convenience.
+    if (viewer.role === RoleName.AGENT) {
+      const isSelfClaimOfUnassigned =
+        visibleTicket.assigneeId === null && input.assigneeId === viewer.sub;
+
+      if (!isSelfClaimOfUnassigned) {
+        throw new ForbiddenException(
+          'Agents can only claim an unassigned ticket on their team. To reassign an owned ticket or return it to the queue, submit an assignment request.',
+        );
+      }
+    }
+
     if (input.assigneeId !== null) {
       const assigneeUser = await this.prisma.user.findUnique({
         where: {

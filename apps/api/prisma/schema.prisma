@@ -53,6 +53,9 @@ enum NotificationType {
   NOTE_ADDED
   SLA_AT_RISK
   SLA_BREACHED
+  ASSIGNMENT_REQUEST_CREATED
+  ASSIGNMENT_REQUEST_APPROVED
+  ASSIGNMENT_REQUEST_REJECTED
 }
 
 enum SlaPlanAppliesTo {
@@ -66,6 +69,18 @@ enum SlaTargetState {
   AT_RISK
   BREACHED
   MET
+}
+
+enum AssignmentRequestType {
+  REASSIGN_USER
+  RETURN_TO_QUEUE
+}
+
+enum AssignmentRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
 }
 
 model Role {
@@ -95,6 +110,9 @@ model User {
   notifications       Notification[]
   auditLogs           AuditLog[]
   deletedTickets      Ticket[]        @relation("TicketDeletedBy")
+  assignmentRequestsCreated  AssignmentRequest[] @relation("AssignmentRequestRequester")
+  assignmentRequestsAssigned AssignmentRequest[] @relation("AssignmentRequestAssignee")
+  assignmentRequestsReviewed AssignmentRequest[] @relation("AssignmentRequestReviewer")
 }
 
 model Team {
@@ -172,6 +190,7 @@ model Ticket {
   messages           TicketMessage[]
   attachments        Attachment[]
   notifications      Notification[]
+  assignmentRequests AssignmentRequest[]
 
   @@index([requesterId])
   @@index([assigneeId])
@@ -297,4 +316,28 @@ model AuditLog {
   @@index([actorId])
   @@index([action])
   @@index([targetType, targetId])
+}
+
+model AssignmentRequest {
+  id                  String                  @id @default(uuid()) @db.Uuid
+  ticketId            String                  @db.Uuid
+  requestedById       String                  @db.Uuid
+  requestedAssigneeId String?                 @db.Uuid
+  type                AssignmentRequestType
+  reason              String                  @db.Text
+  status              AssignmentRequestStatus @default(PENDING)
+  reviewedById        String?                 @db.Uuid
+  reviewNote          String?                 @db.Text
+  reviewedAt          DateTime?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  ticket              Ticket                  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  requestedBy         User                    @relation("AssignmentRequestRequester", fields: [requestedById], references: [id], onDelete: Cascade)
+  requestedAssignee   User?                   @relation("AssignmentRequestAssignee", fields: [requestedAssigneeId], references: [id], onDelete: SetNull)
+  reviewedBy          User?                   @relation("AssignmentRequestReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([ticketId, status])
+  @@index([requestedById, status])
+  @@index([status, createdAt])
+  @@index([requestedAssigneeId])
 }

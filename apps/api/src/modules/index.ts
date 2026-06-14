@@ -1,4 +1,5 @@
 export * from './admin';
+export * from './assignment-requests';
 export * from './attachments';
 export * from './audit';
 export * from './auth';
